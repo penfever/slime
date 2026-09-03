@@ -62,6 +62,10 @@ class ClaudeCodeHarness(BaseHarness):
         env = {
             "ANTHROPIC_BASE_URL": ctx.adapter_url,
             "ANTHROPIC_AUTH_TOKEN": ctx.session_id,
+            # Some launchers use Authorization for their own endpoint token.
+            # Claude also sends ANTHROPIC_API_KEY as X-Api-Key, which lets the
+            # adapter recover the rollout session when Authorization is replaced.
+            "ANTHROPIC_API_KEY": ctx.session_id,
             "ANTHROPIC_MODEL": ctx.model_label,
             **self.static_env,
         }

@@ -90,6 +90,16 @@ def get_current_node_ip():
     # etc.) can use other helpers in this module without requiring ray.
     import ray
 
+    # ``services.get_node_ip_address()`` falls back to loopback when Ray was
+    # built with cluster support disabled, even inside a connected worker. The
+    # runtime context and node table still contain the address that Ray uses to
+    # reach this worker, so prefer that address for cross-node process groups.
+    if ray.is_initialized():
+        node_id = ray.get_runtime_context().get_node_id()
+        for node in ray.nodes():
+            if node.get("NodeID") == node_id and node.get("NodeManagerAddress"):
+                return node["NodeManagerAddress"].strip("[]")
+
     address = ray._private.services.get_node_ip_address()
     # strip ipv6 address
     address = address.strip("[]")

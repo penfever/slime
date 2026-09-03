@@ -20,6 +20,18 @@ from collections.abc import Sequence
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _JOB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+SUPPORTED_PRIORITIES = ("production", "interactive", "batch")
+DEFAULT_NODES = 1
+DEFAULT_GPU_VARIANT = "H100"
+DEFAULT_GPUS_PER_NODE = 8
+DEFAULT_CPU = 64.0
+DEFAULT_MEMORY = "512GB"
+DEFAULT_DISK = "1TB"
+DEFAULT_PRIORITY = "interactive"
+DEFAULT_MAX_RETRIES_FAILURE = 0
+DEFAULT_MAX_RETRIES_PREEMPTION = 1000
+DEFAULT_MAX_TASK_FAILURES = 0
+DEFAULT_TIMEOUT_SECONDS = 0
 
 
 class LaunchConfigError(ValueError):
@@ -36,17 +48,17 @@ class IrisLaunchSpec:
     cluster: str | None = None
     cluster_config: Path | None = None
     controller_url: str | None = None
-    nodes: int = 1
-    gpu_variant: str = "H100"
-    gpus_per_node: int = 8
-    cpu: float = 64
-    memory: str = "512GB"
-    disk: str = "1TB"
-    priority: str = "interactive"
-    max_retries_failure: int = 0
-    max_retries_preemption: int = 1000
-    max_task_failures: int = 0
-    timeout_seconds: int = 0
+    nodes: int = DEFAULT_NODES
+    gpu_variant: str = DEFAULT_GPU_VARIANT
+    gpus_per_node: int = DEFAULT_GPUS_PER_NODE
+    cpu: float = DEFAULT_CPU
+    memory: str = DEFAULT_MEMORY
+    disk: str = DEFAULT_DISK
+    priority: str = DEFAULT_PRIORITY
+    max_retries_failure: int = DEFAULT_MAX_RETRIES_FAILURE
+    max_retries_preemption: int = DEFAULT_MAX_RETRIES_PREEMPTION
+    max_task_failures: int = DEFAULT_MAX_TASK_FAILURES
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     env: dict[str, str] = field(default_factory=dict)
     secret_env_names: tuple[str, ...] = ()
     setup_commands: tuple[str, ...] = ()
@@ -84,8 +96,8 @@ class IrisLaunchSpec:
             raise LaunchConfigError("--memory must not be empty")
         if not self.disk.strip():
             raise LaunchConfigError("--disk must not be empty")
-        if self.priority not in {"production", "interactive", "batch"}:
-            raise LaunchConfigError("--priority must be production, interactive, or batch")
+        if self.priority not in SUPPORTED_PRIORITIES:
+            raise LaunchConfigError(f"--priority must be one of: {', '.join(SUPPORTED_PRIORITIES)}")
         for name, value in (
             ("--max-retries-failure", self.max_retries_failure),
             ("--max-retries-preemption", self.max_retries_preemption),
@@ -125,7 +137,9 @@ class IrisLaunchSpec:
 class LaunchBackend(Protocol):
     """Submission boundary used by the CLI and unit tests."""
 
-    def submit(self, spec: IrisLaunchSpec, workspace: Path, *, wait: bool) -> str: ...
+    def submit(self, spec: IrisLaunchSpec, workspace: Path, *, wait: bool) -> str:
+        """Submit the specification and return its fully qualified Iris job ID."""
+        ...
 
 
 class IrisBackend:
@@ -133,10 +147,15 @@ class IrisBackend:
 
     def submit(self, spec: IrisLaunchSpec, workspace: Path, *, wait: bool) -> str:
         try:
-            from iris.cli.connect import open_iris_client
-            from iris.cluster.types import Entrypoint, EnvironmentSpec, ResourceSpec, gpu_device
-            from iris.rpc import job_pb2
-            from rigging.timing import Duration
+            from iris.cli.connect import open_iris_client  # noqa: PLC0415
+            from iris.cluster.types import (  # noqa: PLC0415
+                Entrypoint,
+                EnvironmentSpec,
+                ResourceSpec,
+                gpu_device,
+            )
+            from iris.rpc import job_pb2  # noqa: PLC0415
+            from rigging.timing import Duration  # noqa: PLC0415
         except ImportError as error:
             raise RuntimeError(
                 "Iris is not installed. Run this launcher with the Iris package from marin-community/marin."
@@ -211,17 +230,22 @@ def create_parser() -> argparse.ArgumentParser:
     endpoint.add_argument("--controller-url", help="direct Iris controller URL")
     parser.add_argument("--job-name", default=None, help="unique Iris job name")
     parser.add_argument("--task-image", required=True, help="GPU image with Slime dependencies already installed")
-    parser.add_argument("--nodes", type=int, default=1, help="Iris task count; currently must be 1")
-    parser.add_argument("--gpu-variant", default="H100")
-    parser.add_argument("--gpus-per-node", type=int, default=8)
-    parser.add_argument("--cpu", type=float, default=64)
-    parser.add_argument("--memory", default="512GB")
-    parser.add_argument("--disk", default="1TB")
-    parser.add_argument("--priority", choices=("production", "interactive", "batch"), default="interactive")
-    parser.add_argument("--max-retries-failure", type=int, default=0)
-    parser.add_argument("--max-retries-preemption", type=int, default=1000)
-    parser.add_argument("--max-task-failures", type=int, default=0)
-    parser.add_argument("--timeout-seconds", type=int, default=0, help="per-task timeout; zero disables it")
+    parser.add_argument("--nodes", type=int, default=DEFAULT_NODES, help="Iris task count; currently must be 1")
+    parser.add_argument("--gpu-variant", default=DEFAULT_GPU_VARIANT)
+    parser.add_argument("--gpus-per-node", type=int, default=DEFAULT_GPUS_PER_NODE)
+    parser.add_argument("--cpu", type=float, default=DEFAULT_CPU)
+    parser.add_argument("--memory", default=DEFAULT_MEMORY)
+    parser.add_argument("--disk", default=DEFAULT_DISK)
+    parser.add_argument("--priority", choices=SUPPORTED_PRIORITIES, default=DEFAULT_PRIORITY)
+    parser.add_argument("--max-retries-failure", type=int, default=DEFAULT_MAX_RETRIES_FAILURE)
+    parser.add_argument("--max-retries-preemption", type=int, default=DEFAULT_MAX_RETRIES_PREEMPTION)
+    parser.add_argument("--max-task-failures", type=int, default=DEFAULT_MAX_TASK_FAILURES)
+    parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help="per-task timeout; zero disables it",
+    )
     parser.add_argument("--env", action="append", type=_parse_env_assignment, default=[], metavar="NAME=VALUE")
     parser.add_argument(
         "--secret-env",

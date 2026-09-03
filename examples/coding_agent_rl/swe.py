@@ -28,8 +28,9 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple
 
 from slime.agent import sandbox as agent_sandbox
@@ -100,6 +101,7 @@ def _metadata_scaleswe(sample: Sample) -> dict[str, Any]:
         "image": m.get("image") or rem.get("image_url"),
         "snapshot": m.get("snapshot") or rem.get("snapshot"),
         "workdir": m.get("workdir") or rem.get("workdir"),
+        "output_files": m.get("output_files") or rem.get("output_files") or [],
         "problem_statement": m.get("problem_statement") or _coerce_prompt(sample.prompt),
         "looks_swebench": looks_swebench,
         "grading": {
@@ -153,7 +155,25 @@ def _coerce_prompt(prompt) -> str:
 def evaluability_check(md: dict) -> str | None:
     if md.get("protocol") == PROTOCOL_SWEBENCH:
         return _evaluability_check_swebench(md)
-    return "protocol_row_mismatch:looks_swebench" if md.get("looks_swebench") else None
+    if md.get("looks_swebench"):
+        return "protocol_row_mismatch:looks_swebench"
+    return _output_files_error(md.get("output_files"))
+
+
+def _output_files_error(output_files: Any) -> str | None:
+    if not isinstance(output_files, (list, tuple)):
+        return "output_files_must_be_a_list"
+    seen: set[str] = set()
+    for value in output_files:
+        if not isinstance(value, str):
+            return "output_file_must_be_a_string"
+        path = PurePosixPath(value)
+        if not value or path.is_absolute() or path.as_posix() != value or value == "." or ".." in path.parts:
+            return f"invalid_output_file:{value!r}"
+        if value in seen:
+            return f"duplicate_output_file:{value!r}"
+        seen.add(value)
+    return None
 
 
 def _evaluability_check_swebench(md: dict) -> str | None:
@@ -235,10 +255,30 @@ async def git_diff(sb: Sandbox, workdir: str) -> str:
     return out
 
 
+async def capture_output_files(sb: Sandbox, workdir: str, paths: list[str] | tuple[str, ...]) -> dict[str, str]:
+    """Read declared text outputs that resolve to regular files below workdir."""
+    captured: dict[str, str] = {}
+    root_arg = shlex.quote(workdir)
+    for relative_path in paths:
+        sandbox_path = f"{workdir}/{relative_path}"
+        path_arg = shlex.quote(sandbox_path)
+        command = (
+            f"root=$(realpath -e -- {root_arg}) && candidate=$(realpath -e -- {path_arg}) && "
+            'case "$candidate" in "$root"/*) test -f "$candidate" && test ! -L '
+            f"{path_arg} ;; *) exit 1 ;; esac"
+        )
+        exit_code, _, _ = await sb.exec(command, user="agent", check=False, timeout=30)
+        if exit_code == 0:
+            captured[relative_path] = await sb.read_file(sandbox_path, user="agent")
+    return captured
+
+
 # ---------------------------------------------------------------------------
 # Eval dispatch (fresh sandbox, apply diff, run dataset tests)
 # ---------------------------------------------------------------------------
-async def run_evaluation(md: dict, *, diff_text: str, timeout_sec: int) -> EvalResult:
+async def run_evaluation(
+    md: dict, *, diff_text: str, timeout_sec: int, output_files: dict[str, str] | None = None
+) -> EvalResult:
     """Uniform entry point: dispatch to the protocol's grader.
 
     No-test-cheating guarantee (both grading protocols): the eval sandbox is built from
@@ -246,13 +286,13 @@ async def run_evaluation(md: dict, *, diff_text: str, timeout_sec: int) -> EvalR
     reward."""
     if md.get("protocol") == PROTOCOL_SWEBENCH:
         return await _grade_swebench(md, diff_text, timeout_sec)
-    return await _grade_scaleswe(md, diff_text, timeout_sec)
+    return await _grade_scaleswe(md, diff_text, timeout_sec, output_files or {})
 
 
 # ---------------------------------------------------------------------------
 # scaleswe grader
 # ---------------------------------------------------------------------------
-async def _grade_scaleswe(md: dict, diff_text: str, timeout_sec: int) -> EvalResult:
+async def _grade_scaleswe(md: dict, diff_text: str, timeout_sec: int, output_files: dict[str, str]) -> EvalResult:
     """Three mutually-exclusive grading paths, in priority order: swepro test
     harness, a shell ``eval_cmd``, or a self-contained ``f2p_script`` pytest
     file. All resolve to "exit 0 == solved", reward is 1.0 iff solved."""
@@ -279,6 +319,8 @@ async def _grade_scaleswe(md: dict, diff_text: str, timeout_sec: int) -> EvalRes
         applied = await _apply_diff(ev, workdir, diff_text)
         if not applied:
             return EvalResult(0.0, False)
+        if not await _materialize_output_files(ev, workdir, output_files):
+            return EvalResult(0.0, False)
 
         if swepro:
             r = await _run_swepro(ev, workdir, swepro, timeout_sec)
@@ -287,6 +329,27 @@ async def _grade_scaleswe(md: dict, diff_text: str, timeout_sec: int) -> EvalRes
         else:
             r = await _run_f2p_script(ev, workdir, f2p_script, timeout_sec)
         return EvalResult(r, True)
+
+
+async def _materialize_output_files(ev: Sandbox, workdir: str, output_files: dict[str, str]) -> bool:
+    """Write captured outputs without allowing a snapshot symlink to escape workdir."""
+    root_arg = shlex.quote(workdir)
+    for relative_path, content in output_files.items():
+        sandbox_path = f"{workdir}/{relative_path}"
+        parent_arg = shlex.quote(str(PurePosixPath(sandbox_path).parent))
+        path_arg = shlex.quote(sandbox_path)
+        command = (
+            f"root=$(realpath -e -- {root_arg}) && parent=$(realpath -m -- {parent_arg}) && "
+            'case "$parent" in "$root"|"$root"/*) ;; *) exit 1 ;; esac && '
+            f"mkdir -p -- {parent_arg} && parent=$(realpath -e -- {parent_arg}) && "
+            'case "$parent" in "$root"|"$root"/*) test ! -L '
+            f"{path_arg} ;; *) exit 1 ;; esac"
+        )
+        exit_code, _, _ = await ev.exec(command, user="agent", check=False, timeout=30)
+        if exit_code != 0:
+            return False
+        await ev.write_file(sandbox_path, content, user="agent")
+    return True
 
 
 async def _setup_swepro_assets(ev: Sandbox, swepro: dict) -> None:

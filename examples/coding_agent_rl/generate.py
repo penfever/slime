@@ -213,11 +213,13 @@ async def generate(args, base_sample: Sample, sampling_params: dict[str, Any], e
                     prompt=swe.SWE_PROMPT,
                 )
                 diff_text = await swe.git_diff(sb, md["workdir"])
+                output_files = await swe.capture_output_files(sb, md["workdir"], md.get("output_files") or [])
 
             reward, applied_cleanly = await swe.run_evaluation(
                 md,
                 diff_text=diff_text,
                 timeout_sec=CONFIG.eval_timeout_sec,
+                output_files=output_files,
             )
             if evaluation:
                 logger.info(

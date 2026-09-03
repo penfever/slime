@@ -25,6 +25,14 @@ The slime training stack itself follows the standard setup. On top of that you n
 3. **An image routing key** (`SLIME_AGENT_SANDBOX_IMAGE_METADATA_KEY`, legacy `SWE_SANDBOX_IMAGE_METADATA_KEY` still accepted) — the metadata key your E2B gateway uses to route a boot to a specific image (e.g. `image`). Each sample's `metadata.image` is passed under this key when booting the sandbox.
 4. **Network reachability**: on Iris, Slime registers the adapter as a leased capability endpoint, which requires the `marin-iris` package in the task image. Outside Iris, set `ADAPTER_PUBLIC_URL` to a complete public base URL or `ADAPTER_PUBLIC_HOST` to a host that the sandboxes can reach.
 
+For the five-node Qwen3-Coder calendar layout, use
+`run_qwen3_coder_30b_calendar_iris.sh` as the command passed to
+`infra/iris/launcher.py`. The launcher must stage the prepared asset prefix at
+`/app/assets` on every replica and forward `DAYTONA_API_KEY`, `WANDB_API_KEY`,
+`RUN_ID`, and `LEARNING_RATE`. The driver assigns 16 GPUs to the actor and 24
+GPUs to six TP4 rollout engines; `--sglang-server-concurrency 5` caps active
+agent sandboxes at 30 across those engines.
+
 ## Dataset Format
 
 Standard slime JSONL with three keys:

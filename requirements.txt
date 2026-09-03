@@ -17,6 +17,7 @@ pylatexenc
 pyyaml
 qwen_vl_utils # for VLM
 ray[default]
+s3fs
 safetensors
 sglang-router>=0.3.0
 tensorboard

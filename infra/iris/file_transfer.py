@@ -26,7 +26,7 @@ class S3Input:
 
     @classmethod
     def parse(cls, value: str) -> S3Input:
-        source, separator, destination = value.partition("=")
+        source, separator, destination = value.rpartition("=")
         bucket, path_separator, source_path = source.removeprefix("s3://").partition("/")
         if not separator or not source.startswith("s3://") or not bucket or not path_separator or not source_path:
             raise ValueError("expected s3://BUCKET/PATH=/ABSOLUTE/LOCAL/PATH")

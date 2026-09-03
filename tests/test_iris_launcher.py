@@ -107,6 +107,13 @@ def test_multinode_s3_inputs_materialize_before_ray(tmp_path, capsys):
     ]
 
 
+def test_s3_input_preserves_equals_in_object_key():
+    item = S3Input.parse("s3://bucket/tmp/ttl=14d/assets=/app/assets")
+
+    assert item.source == "s3://bucket/tmp/ttl=14d/assets"
+    assert item.destination == Path("/app/assets")
+
+
 def test_s3_input_tree_replaces_destination_before_command(tmp_path, monkeypatch):
     filesystem = fsspec.filesystem("memory")
     filesystem.pipe("bucket/assets/model/config.json", b'{"model": "qwen"}')

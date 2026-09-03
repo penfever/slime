@@ -686,11 +686,12 @@ def create_sandbox(image: str | None, *, snapshot: str | None = None, backend: s
 
 
 async def ensure_agent_user(sb: Sandbox, workdir: str) -> None:
-    """Create the unprivileged 'agent' user that owns workdir + can git diff."""
+    """Create the unprivileged agent user and configure Git when available."""
     await sb.exec(
         f"id agent >/dev/null 2>&1 || useradd -m -s /bin/bash agent && "
         f"chown -R agent:agent /home/agent {workdir} && "
-        f"git config --system --add safe.directory '*' && id agent",
+        f"{{ if command -v git >/dev/null 2>&1; then "
+        f"git config --system --add safe.directory '*'; fi; }} && id agent",
         user="root",
         check=True,
         timeout=60,

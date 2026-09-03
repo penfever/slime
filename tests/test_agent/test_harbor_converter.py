@@ -155,7 +155,7 @@ def test_output_file_must_stay_below_workdir(tmp_path: Path) -> None:
     with pytest.raises(UnsupportedHarborTaskError) as caught:
         convert_task(task, ConversionOverrides(output_files=("../answer.txt",)))
 
-    assert caught.value.features == ("sandbox output file",)
+    assert caught.value.features == ("sandbox output files",)
 
 
 def test_artifact_and_service_features_are_explicitly_rejected(tmp_path: Path) -> None:

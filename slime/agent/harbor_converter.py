@@ -21,6 +21,8 @@ from datetime import date, datetime, time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from slime.agent.sandbox import output_files_error
+
 try:
     import tomllib
 except ImportError:  # pragma: no cover - Python 3.10 only
@@ -135,13 +137,8 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
         reasons.append(
             "environment.workdir: provide an absolute path containing only letters, digits, '.', '_', '-', and '/'"
         )
-    for output_file in overrides.output_files:
-        if not _safe_output_file(output_file):
-            reasons.append(
-                f"sandbox output file: {output_file!r} must be a normalized relative path below the workdir"
-            )
-    if len(overrides.output_files) != len(set(overrides.output_files)):
-        reasons.append("sandbox output files: duplicate paths are not allowed")
+    if output_error := output_files_error(overrides.output_files):
+        reasons.append(f"sandbox output files: {output_error}")
 
     instruction_path = task_dir / "instruction.md"
     test_script = task_dir / "tests" / "test.sh"
@@ -230,13 +227,6 @@ def _task_name(config: dict[str, Any], task_dir: Path) -> str:
 def _safe_workdir(workdir: str) -> bool:
     path = PurePosixPath(workdir)
     return bool(_SAFE_WORKDIR_RE.fullmatch(workdir)) and ".." not in path.parts and workdir != "/"
-
-
-def _safe_output_file(value: Any) -> bool:
-    if not isinstance(value, str) or not value or "\0" in value:
-        return False
-    path = PurePosixPath(value)
-    return not path.is_absolute() and path.as_posix() == value and value != "." and ".." not in path.parts
 
 
 def _verifier_timeout(config: dict[str, Any]) -> float:

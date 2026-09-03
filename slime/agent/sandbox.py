@@ -16,8 +16,8 @@ import os
 import random
 import shlex
 import time
-from collections.abc import Awaitable, Callable
-from pathlib import Path
+from collections.abc import Awaitable, Callable, Sequence
+from pathlib import Path, PurePosixPath
 from typing import Any, Protocol, TypeVar, runtime_checkable
 from uuid import uuid4
 
@@ -28,6 +28,30 @@ ExecResult = tuple[int, str, str]
 FileContent = str | bytes | Path
 _RpcResult = TypeVar("_RpcResult")
 _DAYTONA_INSTANCE_LABEL = "slime.instance"
+
+
+def output_files_error(output_files: object) -> str | None:
+    """Return why declared sandbox outputs are unsafe, or None when valid."""
+    if isinstance(output_files, (str, bytes)) or not isinstance(output_files, Sequence):
+        return "output_files_must_be_a_list"
+    seen: set[str] = set()
+    for value in output_files:
+        if not isinstance(value, str):
+            return "output_file_must_be_a_string"
+        path = PurePosixPath(value)
+        if (
+            not value
+            or "\0" in value
+            or path.is_absolute()
+            or path.as_posix() != value
+            or value == "."
+            or ".." in path.parts
+        ):
+            return f"invalid_output_file:{value!r}"
+        if value in seen:
+            return f"duplicate_output_file:{value!r}"
+        seen.add(value)
+    return None
 
 
 @runtime_checkable

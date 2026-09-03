@@ -194,6 +194,41 @@ def test_generate_produces_trained_samples():
         asyncio.run(run_case(mp))
 
 
+def test_generate_transfers_declared_output_to_fresh_evaluator():
+    async def run_case(monkeypatch):
+        tok = FakeTokenizer()
+        sandboxes: list[FakeSandbox] = []
+
+        def sandbox_factory(image: str = "fake-image", **_ignored) -> FakeSandbox:
+            sb = FakeSandbox(image)
+
+            async def answer_agent(env: dict) -> int:
+                sb.files["/workspace/repo/answer.txt"] = "calendar answer\n"
+                return await _anthropic_agent(env)
+
+            sb.on_launch = answer_agent
+            sandboxes.append(sb)
+            return sb
+
+        _patch_generate(monkeypatch, tok, sandbox_factory)
+        sample = _base_sample(output_files=["answer.txt"], eval_cmd="test -s answer.txt")
+
+        samples = await gen.generate(_args(), sample, sampling_params={"max_new_tokens": 32})
+
+        assert abs(sum(s.reward for s in samples) - 1.0) < 1e-9
+        assert len(sandboxes) == 2
+        assert sandboxes[1].files["/workspace/repo/answer.txt"] == "calendar answer\n"
+
+    with pytest.MonkeyPatch.context() as mp:
+        asyncio.run(run_case(mp))
+
+
+def test_output_files_must_stay_below_workdir():
+    md = swe.get_metadata(_base_sample(output_files=["../hidden-test.txt"]))
+
+    assert swe.evaluability_check(md) == "invalid_output_file:'../hidden-test.txt'"
+
+
 def test_generate_aborts_on_empty_trajectory():
     """If the agent never drives a turn, the session is empty and generate()
     returns a single ABORTED sample (the fan-out shape) rather than crashing."""

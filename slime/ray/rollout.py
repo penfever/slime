@@ -9,6 +9,7 @@ import torch
 from slime.backends.sglang_utils.deployment import start_rollout_servers
 from slime.observability import logging_utils
 from slime.observability.logging_utils import configure_logger, init_tracking
+from slime.observability.metric_utils import group_rewards_by_rollout
 from slime.observability.rollout_data_utils import (
     load_debug_rollout_data,
     save_debug_rollout_data,
@@ -285,21 +286,23 @@ class RolloutManager:
             self.args.advantage_estimator in ["grpo", "gspo", "cispo", "reinforce_plus_plus_baseline"]
             and self.args.rewards_normalization
         ):
-            # group norm
-            rewards = torch.tensor(raw_rewards, dtype=torch.float)
-            if rewards.shape[-1] == self.args.n_samples_per_prompt * self.args.rollout_batch_size:
-                rewards = rewards.reshape(-1, self.args.n_samples_per_prompt)
-            else:
-                # when samples count are not equal in each group
-                rewards = rewards.view(-1, rewards.shape[-1])
-            mean = rewards.mean(dim=-1, keepdim=True)
-            rewards = rewards - mean
+            if len(raw_rewards) == self.args.n_samples_per_prompt * self.args.rollout_batch_size:
+                rewards = torch.tensor(raw_rewards, dtype=torch.float).reshape(-1, self.args.n_samples_per_prompt)
+                rewards = rewards - rewards.mean(dim=-1, keepdim=True)
+                if self.args.advantage_estimator in ["grpo", "gspo", "cispo"] and self.args.grpo_std_normalization:
+                    rewards = rewards / (rewards.std(dim=-1, keepdim=True) + 1e-6)
+                return raw_rewards, rewards.flatten().tolist()
 
-            if self.args.advantage_estimator in ["grpo", "gspo", "cispo"] and self.args.grpo_std_normalization:
-                std = rewards.std(dim=-1, keepdim=True)
-                rewards = rewards / (std + 1e-6)
-
-            return raw_rewards, rewards.flatten().tolist()
+            normalized_rewards = [0.0] * len(raw_rewards)
+            for group in group_rewards_by_rollout(samples, raw_rewards):
+                rewards = torch.tensor([reward for reward, _ in group], dtype=torch.float)
+                rewards = rewards - rewards.mean()
+                if self.args.advantage_estimator in ["grpo", "gspo", "cispo"] and self.args.grpo_std_normalization:
+                    rewards = rewards / (rewards.std() + 1e-6)
+                for normalized_reward, (_, positions) in zip(rewards.tolist(), group, strict=True):
+                    for position in positions:
+                        normalized_rewards[position] = normalized_reward
+            return raw_rewards, normalized_rewards
 
         return raw_rewards, raw_rewards
 
@@ -336,6 +339,14 @@ class RolloutManager:
             "sample_indices": [sample.index for sample in samples],
             "rollout_ids": rollout_ids,
         }
+
+        if len(raw_rewards) != self.args.n_samples_per_prompt * self.args.rollout_batch_size:
+            # Agent rollouts can fan one environment trajectory out into
+            # several training samples. Keep one outcome per original rollout
+            # for pass@k; segment-level raw rewards remain aligned with the
+            # flattened samples used by training and debug logging.
+            grouped_rewards = group_rewards_by_rollout(samples, raw_rewards)
+            train_data["passrate_raw_reward"] = [reward for group in grouped_rewards for reward, _ in group]
 
         # loss mask
         # TODO: compress the loss mask
@@ -477,7 +488,7 @@ class RolloutManager:
                     continue
                 rollout_data[key] = [data[key][j] for j in partition]
             # keys that need to be splited at train side
-            for key in ["raw_reward", "total_lengths"]:
+            for key in ["raw_reward", "passrate_raw_reward", "total_lengths"]:
                 if key not in data:
                     continue
                 rollout_data[key] = data[key]

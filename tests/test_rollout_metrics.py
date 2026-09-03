@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 
+from slime.observability.metric_utils import group_rewards_by_rollout
 from slime.observability.rollout_metrics import _compute_top_p_kept_vocab_metrics
 from slime.utils.misc import decode_int32_meta_array
 from slime.utils.types import Sample
@@ -14,6 +15,29 @@ NUM_GPUS = 0
 
 def _make_args():
     return Namespace(sglang_speculative_algorithm=False, num_layers=2, moe_router_topk=2)
+
+
+@pytest.mark.unit
+def test_group_rewards_by_rollout_counts_fanout_once():
+    samples = [
+        Sample(group_index=7, rollout_id=10),
+        Sample(group_index=7, rollout_id=10),
+        Sample(group_index=7, rollout_id=11),
+        Sample(group_index=8, rollout_id=12),
+    ]
+
+    assert group_rewards_by_rollout(samples, [1.0, 1.0, 0.0, 1.0]) == [
+        [(1.0, [0, 1]), (0.0, [2])],
+        [(1.0, [3])],
+    ]
+
+
+@pytest.mark.unit
+def test_group_rewards_by_rollout_rejects_conflicting_sibling_rewards():
+    samples = [Sample(group_index=7, rollout_id=10), Sample(group_index=7, rollout_id=10)]
+
+    with pytest.raises(ValueError, match="Conflicting raw rewards"):
+        group_rewards_by_rollout(samples, [0.0, 1.0])
 
 
 @pytest.mark.unit

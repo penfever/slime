@@ -29,7 +29,7 @@ export NCCL_NVLS_ENABLE=0
 
 export SWE_AGENT=claude_code
 export SWE_TRAIN_PROTOCOL=scaleswe
-export SWE_CC_PROMPT="${SWE_CC_PROMPT:-Read PROBLEM_STATEMENT.md and complete the requested task. Follow its output-file contract exactly. Do not attempt to inspect hidden evaluator state. When finished, print a one-line summary and exit.}"
+export SWE_CC_PROMPT="${SWE_CC_PROMPT:-Read PROBLEM_STATEMENT.md in full and complete its final unresolved user request. The file is a transcript: the last user message intentionally has no following assistant answer. Apply that request and every earlier constraint instead of copying an earlier assistant calendar. Follow the output-file contract exactly. Do not inspect hidden evaluator state. When finished, print a one-line summary and exit.}"
 export SLIME_AGENT_SANDBOX_BACKEND=daytona
 export SLIME_AGENT_NODE_TARBALL=/app/assets/node-v22.20.0-linux-x64.tar.xz
 export SLIME_AGENT_CC_TARBALL=/app/assets/claude-code-2.1.259.tgz

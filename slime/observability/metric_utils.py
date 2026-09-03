@@ -7,6 +7,28 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def group_rewards_by_rollout(samples, rewards: list[float]) -> list[list[tuple[float, list[int]]]]:
+    """Group flattened rewards by prompt and original rollout."""
+    groups = {}
+    for position, (sample, reward) in enumerate(zip(samples, rewards, strict=True)):
+        group_id = sample.group_index
+        rollout_id = sample.rollout_id
+        if group_id is None or rollout_id is None:
+            raise ValueError("Fan-out reward grouping requires group_index and rollout_id on every sample.")
+        group = groups.setdefault(group_id, {})
+        if rollout_id in group:
+            previous_reward, positions = group[rollout_id]
+            if previous_reward != reward:
+                raise ValueError(
+                    f"Conflicting raw rewards for group_index {group_id}, rollout_id {rollout_id}: "
+                    f"{previous_reward} != {reward}"
+                )
+            positions.append(position)
+        else:
+            group[rollout_id] = (reward, [position])
+    return [list(group.values()) for group in groups.values()]
+
+
 def dict_add_prefix(d: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {f"{prefix}{k}": v for k, v in d.items()}
 

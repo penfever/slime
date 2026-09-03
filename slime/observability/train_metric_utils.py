@@ -345,13 +345,13 @@ def log_passrate(rollout_id: int, args: Namespace, rollout_data: RolloutBatch) -
         return
 
     log_dict = {}
-    for key, value in rollout_data.items():
-        if key == "raw_reward":
-            log_dict |= compute_pass_rate(
-                flat_rewards=value,
-                group_size=args.n_samples_per_prompt,
-                num_groups=args.rollout_batch_size,
-            )
+    rewards = rollout_data.get("passrate_raw_reward", rollout_data.get("raw_reward"))
+    if rewards is not None:
+        log_dict |= compute_pass_rate(
+            flat_rewards=rewards,
+            group_size=args.n_samples_per_prompt,
+            num_groups=args.rollout_batch_size,
+        )
     gather_log_data("passrate", args, rollout_id, log_dict)
 
 

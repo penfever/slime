@@ -243,6 +243,27 @@ def test_git_diff_excludes_declared_output_files():
     asyncio.run(run_case())
 
 
+def test_git_diff_allows_output_only_task_without_git():
+    async def run_case():
+        sandbox = FakeSandbox(responses=[("git add -N", (127, "git: command not found", ""))])
+
+        diff = await swe.git_diff(sandbox, "/workspace/repo", ["answer.txt"])
+
+        assert diff == ""
+
+    asyncio.run(run_case())
+
+
+def test_git_diff_failure_aborts_task_without_declared_outputs():
+    async def run_case():
+        sandbox = FakeSandbox(responses=[("git add -N", (128, "not a git repository", ""))])
+
+        with pytest.raises(RuntimeError, match=r"failed to capture agent diff \(exit 128\)"):
+            await swe.git_diff(sandbox, "/workspace/repo")
+
+    asyncio.run(run_case())
+
+
 def test_generate_aborts_on_empty_trajectory():
     """If the agent never drives a turn, the session is empty and generate()
     returns a single ABORTED sample (the fan-out shape) rather than crashing."""

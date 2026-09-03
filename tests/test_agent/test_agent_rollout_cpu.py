@@ -265,6 +265,28 @@ def test_generate_aborts_on_missing_image():
         asyncio.run(run_case(mp))
 
 
+def test_generate_can_pass_the_sample_prompt_directly_to_the_agent():
+    async def run_case(monkeypatch):
+        tok = FakeTokenizer()
+        _patch_generate(monkeypatch, tok, FakeSandbox.factory(on_launch=_anthropic_agent))
+        monkeypatch.setattr(gen, "CONFIG", dataclasses.replace(gen.CONFIG, use_sample_prompt=True))
+        captured = {}
+
+        async def record_prompt(_self, _sandbox, **kwargs):
+            captured["prompt"] = kwargs["prompt"]
+            return 0
+
+        monkeypatch.setattr(ClaudeCodeHarness, "run", record_prompt)
+        sample = _base_sample()
+
+        await gen.generate(_args(), sample, sampling_params={})
+
+        assert captured["prompt"] == sample.prompt
+
+    with pytest.MonkeyPatch.context() as mp:
+        asyncio.run(run_case(mp))
+
+
 # ===========================================================================
 # §2 the Codex + OpenAI pair closes the same loop (hand-wired)
 # ===========================================================================

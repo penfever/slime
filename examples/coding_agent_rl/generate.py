@@ -68,6 +68,7 @@ class SweConfig:
     rollout_guard_sec: int
     boot_concurrency: int
     boot_retries: int
+    use_sample_prompt: bool
 
     @classmethod
     def from_env(cls) -> SweConfig:
@@ -88,6 +89,7 @@ class SweConfig:
             rollout_guard_sec=guard,
             boot_concurrency=int(os.environ.get("SWE_BOOT_CONCURRENCY", "16")),
             boot_retries=int(os.environ.get("SWE_BOOT_RETRIES", "2")),
+            use_sample_prompt=os.environ.get("SWE_USE_SAMPLE_PROMPT", "0") == "1",
         )
 
 
@@ -228,13 +230,14 @@ async def generate(args, base_sample: Sample, sampling_params: dict[str, Any], e
         async with asyncio.timeout(CONFIG.rollout_guard_sec):
             async with boot_agent_sandbox(md.get("image"), md.get("snapshot"), instance_id) as sb:
                 await swe.prepare_workspace(sb, md["workdir"], md)
+                prompt = str(base_sample.prompt) if CONFIG.use_sample_prompt else swe.SWE_PROMPT
                 agent_exit_code = await HARNESS_CLS().run(
                     sb,
                     workdir=md["workdir"],
                     session_id=session_id,
                     adapter_url=state.adapter_url,
                     time_budget_sec=CONFIG.agent_time_budget_sec,
-                    prompt=swe.SWE_PROMPT,
+                    prompt=prompt,
                 )
                 diff_text = await swe.git_diff(sb, md["workdir"])
                 output_files = await swe.capture_output_files(sb, md["workdir"], md.get("output_files") or [])

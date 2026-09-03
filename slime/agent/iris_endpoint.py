@@ -15,12 +15,13 @@ TOKEN_REFRESH_MARGIN_SECONDS = 15 * 60
 
 
 def _mint_request(endpoint_name: str, ttl_seconds: int) -> Any:
-    from google.protobuf.duration_pb2 import Duration
     from iris.rpc import controller_pb2
+    from iris.time_proto import duration_to_proto
+    from rigging.timing import Duration
 
     return controller_pb2.Controller.MintEndpointTokenRequest(
         endpoint_name=endpoint_name,
-        ttl=Duration(seconds=ttl_seconds),
+        ttl=duration_to_proto(Duration.from_seconds(ttl_seconds)),
     )
 
 

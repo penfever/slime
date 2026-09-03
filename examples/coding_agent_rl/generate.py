@@ -239,8 +239,9 @@ async def generate(args, base_sample: Sample, sampling_params: dict[str, Any], e
                     time_budget_sec=CONFIG.agent_time_budget_sec,
                     prompt=prompt,
                 )
-                diff_text = await swe.git_diff(sb, md["workdir"])
-                output_files = await swe.capture_output_files(sb, md["workdir"], md.get("output_files") or [])
+                declared_output_files = md.get("output_files") or []
+                diff_text = await swe.git_diff(sb, md["workdir"], declared_output_files)
+                output_files = await swe.capture_output_files(sb, md["workdir"], declared_output_files)
 
             reward, applied_cleanly = await swe.run_evaluation(
                 md,

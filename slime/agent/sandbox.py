@@ -697,7 +697,7 @@ def _daytona_sdk() -> Any:
 
 def create_sandbox(image: str | None, *, snapshot: str | None = None, backend: str | None = None) -> Sandbox:
     """Create the configured sandbox provider without changing its public protocol."""
-    selected_backend = backend or _getenv("SLIME_AGENT_SANDBOX_BACKEND", default="e2b")
+    selected_backend = backend or _getenv("SLIME_AGENT_SANDBOX_BACKEND") or ("daytona" if snapshot else "e2b")
     if selected_backend == "e2b":
         if snapshot is not None:
             raise ValueError("E2B sandbox selection does not support Daytona snapshots")

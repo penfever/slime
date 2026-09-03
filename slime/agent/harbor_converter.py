@@ -21,6 +21,8 @@ from datetime import date, datetime, time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from slime.agent.sandbox import output_files_error
+
 try:
     import tomllib
 except ImportError:  # pragma: no cover - Python 3.10 only
@@ -69,6 +71,7 @@ class ConversionOverrides:
     image: str | None = None
     snapshot: str | None = None
     workdir: str | None = None
+    output_files: tuple[str, ...] = ()
 
 
 def strip_canary(text: str) -> str:
@@ -134,6 +137,8 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
         reasons.append(
             "environment.workdir: provide an absolute path containing only letters, digits, '.', '_', '-', and '/'"
         )
+    if output_error := output_files_error(overrides.output_files):
+        reasons.append(f"sandbox output files: {output_error}")
 
     instruction_path = task_dir / "instruction.md"
     test_script = task_dir / "tests" / "test.sh"
@@ -175,6 +180,8 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
         metadata["image"] = image
     else:
         metadata["snapshot"] = snapshot
+    if overrides.output_files:
+        metadata["output_files"] = list(overrides.output_files)
 
     setup_files = task_dir / "setup_files"
     if setup_files.is_dir() and any(setup_files.iterdir()):
@@ -398,22 +405,31 @@ def _parse_assignments(values: list[str], option: str) -> dict[str, str]:
     return assignments
 
 
-def _write_rows(rows: list[dict[str, Any]], output: str) -> None:
-    content = "".join(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n" for row in rows)
+def write_rows(rows: Iterable[dict[str, Any]], output: str | Path) -> int:
+    """Write JSONL rows atomically when output is a path and return the count."""
+    count = 0
     if output == "-":
-        sys.stdout.write(content)
-    else:
-        output_path = Path(output)
-        temporary_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("w", dir=output_path.parent, delete=False) as stream:
-                stream.write(content)
-                temporary_path = Path(stream.name)
-            os.replace(temporary_path, output_path)
-        except OSError as exc:
-            if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
-            raise HarborConversionError(f"Could not write {output_path}: {exc}") from exc
+        for row in rows:
+            sys.stdout.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
+            count += 1
+        return count
+
+    output_path = Path(output)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=output_path.parent, delete=False) as stream:
+            temporary_path = Path(stream.name)
+            for row in rows:
+                stream.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
+                count += 1
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+    except OSError as exc:
+        raise HarborConversionError(f"Could not write {output_path}: {exc}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return count
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -432,6 +448,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--workdir", action="append", default=[], metavar="TASK=PATH", help="override a workdir by task name"
+    )
+    parser.add_argument(
+        "--output-file",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="transfer a task-relative text file into the clean evaluator; repeat for multiple files",
     )
     parser.add_argument(
         "--skip-unsupported", action="store_true", help="report unsupported tasks and write the remaining rows"
@@ -461,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
                 image=maps["image"].get(name),
                 snapshot=maps["snapshot"].get(name),
                 workdir=maps["workdir"].get(name),
+                output_files=tuple(args.output_file),
             )
             try:
                 rows.append(convert_task(task_dir, overrides))
@@ -470,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
             raise HarborConversionError("\n".join(str(failure) for failure in failures))
         for failure in failures:
             print(failure, file=sys.stderr)
-        _write_rows(rows, args.output)
+        write_rows(rows, args.output)
         return 0
     except HarborConversionError as exc:
         print(exc, file=sys.stderr)

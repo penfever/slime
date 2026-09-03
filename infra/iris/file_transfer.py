@@ -12,6 +12,11 @@ import subprocess
 import tempfile
 
 
+S3_CONNECT_TIMEOUT = 10
+S3_READ_TIMEOUT = 60
+S3_MAX_ATTEMPTS = 5
+
+
 @dataclass(frozen=True)
 class S3Input:
     """An S3 object or prefix and its absolute node-local destination."""
@@ -43,7 +48,14 @@ def _filesystem_and_path(source: str):
         raise RuntimeError("S3 inputs require fsspec and s3fs in the task image") from error
 
     try:
-        return fsspec.core.url_to_fs(source)
+        return fsspec.core.url_to_fs(
+            source,
+            config_kwargs={
+                "connect_timeout": S3_CONNECT_TIMEOUT,
+                "read_timeout": S3_READ_TIMEOUT,
+                "retries": {"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+            },
+        )
     except ImportError as error:
         raise RuntimeError("S3 inputs require fsspec and s3fs in the task image") from error
 
@@ -79,7 +91,9 @@ def materialize_s3_input(item: S3Input) -> None:
     item.destination.parent.mkdir(parents=True, exist_ok=True)
 
     if filesystem.isfile(source_path):
-        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{item.destination.name}.staging-", dir=item.destination.parent)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{item.destination.name}.staging-", dir=item.destination.parent
+        )
         os.close(descriptor)
         staging = Path(temporary_name)
         try:
@@ -114,7 +128,8 @@ def materialize_s3_input(item: S3Input) -> None:
             shutil.rmtree(staging)
 
 
-def _parse_input(value: str) -> S3Input:
+def parse_s3_input_argument(value: str) -> S3Input:
+    """Parse an S3 input for either the launcher or task-runtime CLI."""
     try:
         return S3Input.parse(value)
     except ValueError as error:
@@ -123,7 +138,7 @@ def _parse_input(value: str) -> S3Input:
 
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--s3-input", action="append", type=_parse_input, default=[])
+    parser.add_argument("--s3-input", action="append", type=parse_s3_input_argument, default=[])
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 

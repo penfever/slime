@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Protocol
 from collections.abc import Sequence
 
-from infra.iris.file_transfer import S3Input
+from infra.iris.file_transfer import S3Input, parse_s3_input_argument
 
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -260,13 +260,6 @@ def _parse_env_name(value: str) -> str:
     return value
 
 
-def _parse_s3_input(value: str) -> S3Input:
-    try:
-        return S3Input.parse(value)
-    except ValueError as error:
-        raise argparse.ArgumentTypeError(str(error)) from error
-
-
 def _default_job_name() -> str:
     return datetime.now(timezone.utc).strftime("slime-%Y%m%d-%H%M%S")
 
@@ -317,7 +310,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--s3-input",
         action="append",
-        type=_parse_s3_input,
+        type=parse_s3_input_argument,
         default=[],
         metavar="S3_URI=ABSOLUTE_PATH",
         help="atomically materialize an S3 object or prefix on every task before Ray starts",

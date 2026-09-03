@@ -3,6 +3,7 @@ import subprocess
 from collections import defaultdict
 from collections.abc import Iterable
 from functools import cache
+from ipaddress import ip_address
 from typing import Any
 
 import torch
@@ -104,6 +105,23 @@ def get_current_node_ip():
     # strip ipv6 address
     address = address.strip("[]")
     return address
+
+
+def get_network_interface_for_ip(address: str) -> str:
+    """Return the local interface that owns ``address``."""
+    import psutil
+
+    target = ip_address(address)
+    for interface, interface_addresses in psutil.net_if_addrs().items():
+        for candidate in interface_addresses:
+            candidate_address = candidate.address.split("%", 1)[0]
+            try:
+                if ip_address(candidate_address) == target:
+                    return interface
+            except ValueError:
+                continue
+
+    raise RuntimeError(f"No local network interface owns node address {address}")
 
 
 def get_free_port(start_port=10000, consecutive=1):

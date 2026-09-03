@@ -21,7 +21,7 @@ from slime.utils import accelerator
 from slime.utils.data import process_rollout_data
 from slime.utils.distributed_utils import get_gloo_group
 from slime.utils.memory_utils import clear_memory, print_memory
-from slime.utils.misc import Box
+from slime.utils.misc import Box, get_current_node_ip, get_network_interface_for_ip
 from slime.utils.reloadable_process_group import (
     destroy_process_groups,
     monkey_patch_torch_dist,
@@ -65,6 +65,10 @@ class MegatronTrainRayActor(TrainRayActor):
         if args.debug_rollout_only:
             self.args = args
             return 0
+
+        node_interface = get_network_interface_for_ip(get_current_node_ip())
+        os.environ.setdefault("GLOO_SOCKET_IFNAME", node_interface)
+        os.environ.setdefault("NCCL_SOCKET_IFNAME", node_interface)
 
         monkey_patch_torch_dist()
         super().init(args, role, with_ref, with_opd_teacher)

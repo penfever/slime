@@ -239,7 +239,12 @@ async def git_diff(sb: Sandbox, workdir: str, output_files: Sequence[str] = ()) 
     excluded_paths = ["PROBLEM_STATEMENT.md", ".harness/", *output_files]
     exclusions = " ".join(shlex.quote(f":(exclude){path}") for path in excluded_paths)
     cmd = f"cd {shlex.quote(workdir)} && git add -N . && git diff -- . {exclusions}"
-    _, out, _ = await sb.exec(cmd, user="agent", timeout=120)
+    exit_code, out, _ = await sb.exec(cmd, user="agent", timeout=120)
+    if exit_code != 0:
+        if output_files:
+            logger.info("[swe] Git diff unavailable; continuing with declared outputs only")
+            return ""
+        raise RuntimeError(f"failed to capture agent diff (exit {exit_code})")
     return out
 
 

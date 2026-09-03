@@ -226,6 +226,28 @@ def test_daytona_exec_reports_results_and_honors_check(fake_daytona):
     assert client.remote.process.commands[0] == ("echo ok", {"NAME": "value"}, 9)
 
 
+def test_daytona_retries_connection_errors_without_http_status(fake_daytona, monkeypatch):
+    client, _ = fake_daytona
+
+    class DaytonaConnectionError(Exception):
+        pass
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(sandbox_module.asyncio, "sleep", no_wait)
+    client.remote.process.responses = [
+        DaytonaConnectionError("connection reset by peer"),
+        SimpleNamespace(exit_code=0, result="ok"),
+    ]
+
+    async def idempotent_command():
+        async with DaytonaSandbox(image="image", rpc_retries=2) as sandbox:
+            return await sandbox.exec("test -f /tmp/ready", idempotent=True)
+
+    assert asyncio.run(idempotent_command()) == (0, "ok", "")
+
+
 def test_daytona_retries_only_replay_safe_commands(fake_daytona, monkeypatch):
     client, _ = fake_daytona
 

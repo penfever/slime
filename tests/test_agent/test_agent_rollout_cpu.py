@@ -229,6 +229,20 @@ def test_output_files_must_stay_below_workdir():
     assert swe.evaluability_check(md) == "invalid_output_file:'../hidden-test.txt'"
 
 
+def test_git_diff_excludes_declared_output_files():
+    async def run_case():
+        sandbox = FakeSandbox()
+
+        await swe.git_diff(sandbox, "/workspace/repo", ["answer.txt", "results/final.json"])
+
+        command, user = sandbox.exec_log[-1]
+        assert user == "agent"
+        assert "':(exclude)answer.txt'" in command
+        assert "':(exclude)results/final.json'" in command
+
+    asyncio.run(run_case())
+
+
 def test_generate_aborts_on_empty_trajectory():
     """If the agent never drives a turn, the session is empty and generate()
     returns a single ABORTED sample (the fan-out shape) rather than crashing."""

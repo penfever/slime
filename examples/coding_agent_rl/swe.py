@@ -235,8 +235,10 @@ async def apply_pre_commands(sb: Sandbox, workdir: str, pre: list[str] | str) ->
 # ---------------------------------------------------------------------------
 # Diff capture (agent sandbox, after harness.run)
 # ---------------------------------------------------------------------------
-async def git_diff(sb: Sandbox, workdir: str) -> str:
-    cmd = f"cd {workdir} && git add -N . && git diff -- . ':(exclude)PROBLEM_STATEMENT.md' ':(exclude).harness/'"
+async def git_diff(sb: Sandbox, workdir: str, output_files: Sequence[str] = ()) -> str:
+    excluded_paths = ["PROBLEM_STATEMENT.md", ".harness/", *output_files]
+    exclusions = " ".join(shlex.quote(f":(exclude){path}") for path in excluded_paths)
+    cmd = f"cd {shlex.quote(workdir)} && git add -N . && git diff -- . {exclusions}"
     _, out, _ = await sb.exec(cmd, user="agent", timeout=120)
     return out
 

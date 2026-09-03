@@ -90,6 +90,18 @@ network isolation, healthchecks, accelerator/resource requests, and artifact
 collection. `--skip-unsupported` reports those tasks on stderr and writes the
 convertible remainder.
 
+TaskTrove datasets store each Harbor task as a compressed `task_binary` inside
+a parquet file. Convert that representation directly without materializing
+solutions:
+
+```bash
+python -m slime.agent.tasktrove_converter /path/to/tasks.parquet \
+  --snapshot snapshot-id \
+  --workdir /app \
+  --output-file answer.txt \
+  --output /path/to/slime-tasks.jsonl
+```
+
 ## Running the Script
 
 Override the paths at the top of the launcher, then run from a long-lived shell on the Ray head node (do **not** wrap in `nohup` — Ray child processes get cleaned up with it):

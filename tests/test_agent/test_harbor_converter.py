@@ -1,5 +1,7 @@
 import json
+import io
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ from slime.agent.harbor_converter import (
     discover_task_dirs,
     main,
 )
+from slime.agent.tasktrove_converter import convert_tasktrove_parquet
 
 
 def _write_task(root: Path, *, name: str = "demo/fix-it", extra_toml: str = "") -> Path:
@@ -235,6 +238,35 @@ def test_cli_can_skip_unsupported_tasks(tmp_path: Path) -> None:
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert [row["label"] for row in rows] == ["demo/supported"]
     assert rows[0]["metadata"]["output_files"] == ["answer.txt"]
+
+
+def test_tasktrove_parquet_conversion_omits_solution(tmp_path: Path) -> None:
+    pa = pytest.importorskip("pyarrow")
+    parquet = pytest.importorskip("pyarrow.parquet")
+    task = _write_task(tmp_path, name="calendar/source")
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+        for path in task.rglob("*"):
+            archive.add(path, arcname=path.relative_to(task))
+    source = tmp_path / "tasks.parquet"
+    parquet.write_table(
+        pa.table({"path": ["calendar-example.tar.gz"], "task_binary": [payload.getvalue()]}),
+        source,
+    )
+    output = tmp_path / "tasks.jsonl"
+
+    count = convert_tasktrove_parquet(
+        source,
+        output,
+        ConversionOverrides(snapshot="calendar-v3", workdir="/app", output_files=("answer.txt",)),
+    )
+
+    row = json.loads(output.read_text())
+    assert count == 1
+    assert row["label"] == "calendar/source"
+    assert row["metadata"]["snapshot"] == "calendar-v3"
+    assert row["metadata"]["output_files"] == ["answer.txt"]
+    assert "NEVER_INCLUDE_ORACLE_SECRET" not in output.read_text()
 
 
 if __name__ == "__main__":

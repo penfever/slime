@@ -3,7 +3,7 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     # Pin the shared checks and vendored guidance to one audited revision.
-#     "marin-style @ git+https://github.com/marin-community/marin-style@5094279da60b47b9a8fa8effaf7f73cd13f1e96f",
+#     "marin-style @ git+https://github.com/marin-community/marin-style@dcbc8d5a81451ebb055b196be426e87c6ca963a6",
 # ]
 # ///
 """Run the pinned Marin-style checks configured for Slime."""

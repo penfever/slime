@@ -131,6 +131,16 @@ an existing PR does not by itself trigger another review.
 
 ## 7. Push
 
+Resolve the GitHub repository from the push target instead of relying on `gh`'s
+default-repository heuristic:
+
+```bash
+repo="$(gh repo view "$(git remote get-url origin)" --json nameWithOwner --jq .nameWithOwner)"
+```
+
+Use `--repo "$repo"` on every following `gh pr` command. Stop if `origin` is
+missing or cannot be resolved; do not fall back to another remote.
+
 If asked, or if the branch has an upstream, push to the remote tracking branch
 (`git push -u origin HEAD` if no upstream is set). If the push is rejected
 (diverged history), stop and ask the user — do not force-push.
@@ -161,6 +171,11 @@ Fixes #1234
 (auto-closes on merge) or `Part of #NNNN` (partial work). Do not invent an issue
 just to satisfy this — omit the link when none exists.
 
+For an automated failure-tracking issue, use `Fixes #NNNN` when the PR is
+expected to restore the failing lane. A later scheduled run may confirm the fix,
+but that does not make the PR partial. Use `Part of #NNNN` only when the PR is
+known not to resolve the tracked failure.
+
 **Specifications (>500 LOC only).** A genuinely large PR must link a spec in an
 issue or Echo design entry. Name the important design decisions in the PR body
 and link the spec for module maps, code excerpts, and detailed rationale.
@@ -168,7 +183,7 @@ and link the spec for module maps, code excerpts, and detailed rationale.
 **Inspect the payload.** Draft the body in a uniquely named temporary file and
 use `--body-file`. Re-open that file and apply the final compression pass before
 publishing. After creating or editing the PR, fetch the exact `title,body` with
-`gh pr view --json title,body` and immediately correct text inserted by a tool
+`gh pr view --repo "$repo" <N> --json title,body` and immediately correct text inserted by a tool
 or stale template.
 
 **Create it.** Unless the user says otherwise and permissions allow, push to a
@@ -176,7 +191,7 @@ branch on the main repository and open the PR from it (use a fork only when
 direct push is unavailable or the user asks):
 
 ```bash
-gh pr create --title "<title>" --body-file "<body-file>" --label agent-generated
+gh pr create --repo "$repo" --title "<title>" --body-file "<body-file>" --label agent-generated
 ```
 
 - Always add the `agent-generated` label.
@@ -188,7 +203,7 @@ gh pr create --title "<title>" --body-file "<body-file>" --label agent-generated
 Opening the PR does not end your turn. Watch CI to completion and respond to
 review activity until the PR is merged or closed, or the user tells you to stop.
 
-- Watch checks with `gh pr checks <N> --watch`. When a check finishes, read its
+- Watch checks with `gh pr checks --repo "$repo" <N> --watch`. When a check finishes, read its
   conclusion — finishing is not passing.
 - On a CI failure, read the failing job log and fix it. A failure in a file you
   did not touch is not automatically pre-existing: confirm the same job fails on

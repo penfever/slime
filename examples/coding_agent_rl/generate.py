@@ -242,6 +242,12 @@ async def generate(args, base_sample: Sample, sampling_params: dict[str, Any], e
                 declared_output_files = md.get("output_files") or []
                 diff_text = await swe.git_diff(sb, md["workdir"], declared_output_files)
                 output_files = await swe.capture_output_files(sb, md["workdir"], declared_output_files)
+                logger.info(
+                    "[coding_agent_rl] %s: artifacts diff_bytes=%d outputs=%s",
+                    instance_id,
+                    len(diff_text.encode()),
+                    {path: len(content.encode()) for path, content in output_files.items()},
+                )
 
             reward, applied_cleanly = await swe.run_evaluation(
                 md,

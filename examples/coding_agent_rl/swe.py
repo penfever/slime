@@ -315,8 +315,10 @@ async def _grade_scaleswe(md: dict, diff_text: str, timeout_sec: int, output_fil
 
         applied = await _apply_diff(ev, workdir, diff_text)
         if not applied:
+            logger.warning("[swe.scaleswe] failed to apply agent diff (%d bytes)", len(diff_text.encode()))
             return EvalResult(0.0, False)
         if not await _materialize_output_files(ev, workdir, output_files):
+            logger.warning("[swe.scaleswe] failed to materialize declared outputs: %s", sorted(output_files))
             return EvalResult(0.0, False)
 
         if swepro:
@@ -342,6 +344,7 @@ async def _materialize_output_files(ev: Sandbox, workdir: str, output_files: dic
         )
         exit_code, _, _ = await ev.exec(command, user="agent", check=False, timeout=30)
         if exit_code != 0:
+            logger.warning("[swe.scaleswe] rejected declared output path %r", relative_path)
             return False
         await ev.write_file(sandbox_path, content, user="agent")
     return True

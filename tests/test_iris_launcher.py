@@ -118,7 +118,13 @@ def test_s3_input_tree_replaces_destination_before_command(tmp_path, monkeypatch
     filesystem = fsspec.filesystem("memory")
     filesystem.pipe("bucket/assets/model/config.json", b'{"model": "qwen"}')
     filesystem.pipe("bucket/assets/data/train.jsonl", b"one\ntwo\n")
-    monkeypatch.setattr(fsspec.core, "url_to_fs", lambda _source, **_options: (filesystem, "bucket/assets"))
+    storage_options = {}
+
+    def resolve_filesystem(_source, **options):
+        storage_options.update(options)
+        return filesystem, "bucket/assets"
+
+    monkeypatch.setattr(fsspec.core, "url_to_fs", resolve_filesystem)
     destination = tmp_path / "assets"
     destination.mkdir()
     (destination / "stale.txt").write_text("stale")
@@ -141,6 +147,7 @@ def test_s3_input_tree_replaces_destination_before_command(tmp_path, monkeypatch
     )
 
     assert exit_code == 0
+    assert storage_options["config_kwargs"]["s3"] == {"addressing_style": "virtual"}
 
 
 @pytest.mark.parametrize(

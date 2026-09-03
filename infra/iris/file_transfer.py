@@ -54,6 +54,7 @@ def _filesystem_and_path(source: str):
                 "connect_timeout": S3_CONNECT_TIMEOUT,
                 "read_timeout": S3_READ_TIMEOUT,
                 "retries": {"max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+                "s3": {"addressing_style": "virtual"},
             },
         )
     except ImportError as error:

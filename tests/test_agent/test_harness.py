@@ -191,13 +191,14 @@ def test_codex_launch_command_and_env():
 # ===========================================================================
 
 
-def test_ensure_agent_user_provisions_user_and_git_safe_dir():
+def test_ensure_agent_user_provisions_user_with_optional_git_safe_dir():
     async def run_case():
         sb = FakeSandbox()
         await sandbox_mod.ensure_agent_user(sb, "/workspace/repo")
         cmd = next(c for c, _ in sb.exec_log if "useradd" in c)
         assert "id agent" in cmd
         assert "chown -R agent:agent" in cmd and "/workspace/repo" in cmd
+        assert "if command -v git" in cmd
         assert "git config --system --add safe.directory '*'" in cmd
 
     asyncio.run(run_case())

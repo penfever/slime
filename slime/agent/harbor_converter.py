@@ -105,8 +105,9 @@ def discover_task_dirs(paths: Iterable[Path]) -> list[Path]:
 def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -> dict[str, Any]:
     """Convert one Harbor task directory to a Slime JSONL row.
 
-    Unsupported Harbor semantics are reported together instead of being
-    silently dropped.  ``solution/`` is deliberately never read.
+    Harbor CPU, memory, storage, and agent-timeout hints are advisory and are
+    intentionally ignored. Other unsupported execution semantics are reported
+    together. ``solution/`` is deliberately never read.
     """
 
     task_dir = task_dir.resolve()
@@ -255,9 +256,6 @@ def _unsupported_reasons(task_dir: Path, config: dict[str, Any]) -> list[str]:
     environment = _table(config, "environment")
     if str(environment.get("os", "linux")).lower() != "linux":
         reasons.append("environment.os: only Linux sandboxes are supported")
-    for field in ("cpus", "memory_mb", "memory", "storage_mb", "storage"):
-        if environment.get(field) is not None:
-            reasons.append(f"environment.{field}: per-task resource enforcement is unavailable")
     if environment.get("gpus") not in (None, 0):
         reasons.append("environment.gpus: accelerator sandboxes are unsupported")
     if environment.get("gpu_types"):
@@ -276,8 +274,6 @@ def _unsupported_reasons(task_dir: Path, config: dict[str, Any]) -> list[str]:
             reasons.append(f"environment.{field}: {description}")
 
     agent = _table(config, "agent")
-    if agent.get("timeout_sec") is not None:
-        reasons.append("agent.timeout_sec: Slime configures one rollout timeout for the dataset")
     if agent.get("user") is not None:
         reasons.append("agent.user: Slime's coding harness runs as the fixed 'agent' user")
 

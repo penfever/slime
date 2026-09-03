@@ -118,7 +118,6 @@ timeout_sec = 20
 
     assert set(caught.value.features) >= {
         "agent.user",
-        "agent.timeout_sec",
         "verifier.env",
         "verifier.environment",
         "verifier.collect",
@@ -126,7 +125,30 @@ timeout_sec = 20
     }
 
 
-def test_resource_and_service_features_are_explicitly_rejected(tmp_path: Path) -> None:
+def test_resource_and_agent_timeout_hints_do_not_block_snapshot_conversion(tmp_path: Path) -> None:
+    task = _write_task(tmp_path)
+    config_path = task / "task.toml"
+    config_path.write_text(
+        config_path.read_text().replace(
+            "[verifier]",
+            """cpus = 1
+memory_mb = 4096
+storage_mb = 10240
+
+[agent]
+timeout_sec = 900
+
+[verifier]""",
+        )
+    )
+
+    row = convert_task(task, ConversionOverrides(snapshot="calendar-v3"))
+
+    assert row["metadata"]["snapshot"] == "calendar-v3"
+    assert "image" not in row["metadata"]
+
+
+def test_artifact_and_service_features_are_explicitly_rejected(tmp_path: Path) -> None:
     task = _write_task(tmp_path)
     config_path = task / "task.toml"
     config_path.write_text(

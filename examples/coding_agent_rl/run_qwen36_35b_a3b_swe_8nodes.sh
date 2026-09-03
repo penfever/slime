@@ -198,7 +198,7 @@ MISC_ARGS=(
 )
 
 # ============ ray cluster network ============
-# Set MASTER_ADDR before the SWE block: ADAPTER_PUBLIC_HOST below falls back to it.
+# Set MASTER_ADDR before the SWE block: off-Iris adapter publication falls back to it.
 export MASTER_ADDR="${MASTER_ADDR:-${MLP_WORKER_0_HOST:-$(hostname -I | awk '{print $1}')}}"
 export MASTER_PORT="${MASTER_PORT:-${MLP_WORKER_0_PORT:-6379}}"
 export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MLP_SOCKET_IFNAME:-eth0}}"
@@ -215,8 +215,11 @@ export SLIME_AGENT_SANDBOX_IMAGE_METADATA_KEY="${SLIME_AGENT_SANDBOX_IMAGE_METAD
 export SLIME_AGENT_NODE_TARBALL="${SLIME_AGENT_NODE_TARBALL:-/path/to/node-v22.x-linux-x64.tar.xz}"
 export SLIME_AGENT_CC_TARBALL="${SLIME_AGENT_CC_TARBALL:-/path/to/anthropic-ai-claude-code-local-linux-x64.tgz}"
 
-# ADAPTER_PUBLIC_HOST must be routable from inside the sandbox (not 127.0.0.1).
-export ADAPTER_PUBLIC_HOST="${ADAPTER_PUBLIC_HOST:-${MASTER_ADDR:-${MLP_WORKER_0_HOST:-127.0.0.1}}}"
+# On Iris, the adapter is published automatically through a capability endpoint.
+# Elsewhere, ADAPTER_PUBLIC_HOST must be routable from inside the sandbox.
+if [[ -z "${IRIS_TASK_ID:-}" ]]; then
+    export ADAPTER_PUBLIC_HOST="${ADAPTER_PUBLIC_HOST:-${MASTER_ADDR:-${MLP_WORKER_0_HOST:-127.0.0.1}}}"
+fi
 export ADAPTER_BIND_HOST="${ADAPTER_BIND_HOST:-0.0.0.0}"
 export ADAPTER_PORT="${ADAPTER_PORT:-18001}"
 
@@ -235,7 +238,7 @@ export SLIME_AGENT_CC_EXTRA_ARGS="--settings '${SETTINGS_JSON}' --disable-slash-
 # export SWE_CC_PROMPT="Read PROBLEM_STATEMENT.md. BEFORE editing any file, dispatch the 'investigator' sub-agent (via the Agent tool with subagent_type=investigator) to locate every file relevant to the issue. Then fix the issue and run the tests."
 
 # ============ proxy bypass for in-cluster traffic ============
-export no_proxy="127.0.0.1,${MASTER_ADDR},${ADAPTER_PUBLIC_HOST}"
+export no_proxy="127.0.0.1,${MASTER_ADDR},${ADAPTER_PUBLIC_HOST:-}"
 export NO_PROXY="${no_proxy}"
 
 cd "${SLIME_DIR}"

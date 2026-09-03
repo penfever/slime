@@ -23,7 +23,7 @@ The slime training stack itself follows the standard setup. On top of that you n
    - Node 22 (`node-v22.x-linux-x64.tar.xz`) — exported as `SLIME_AGENT_NODE_TARBALL`.
    - Claude Code CLI npm tarball (`anthropic-ai-claude-code-local-linux-x64.tgz`) — exported as `SLIME_AGENT_CC_TARBALL`.
 3. **An image routing key** (`SLIME_AGENT_SANDBOX_IMAGE_METADATA_KEY`, legacy `SWE_SANDBOX_IMAGE_METADATA_KEY` still accepted) — the metadata key your E2B gateway uses to route a boot to a specific image (e.g. `image`). Each sample's `metadata.image` is passed under this key when booting the sandbox.
-4. **Network reachability**: each sandbox dials back to the host's Anthropic adapter over `http://${ADAPTER_PUBLIC_HOST}:${ADAPTER_PORT}`. The adapter host must be reachable from inside the sandboxes (set `ADAPTER_PUBLIC_HOST` to a routable IP, not `127.0.0.1`).
+4. **Network reachability**: on Iris, Slime registers the adapter as a leased capability endpoint, which requires the `marin-iris` package in the task image. Outside Iris, set `ADAPTER_PUBLIC_URL` to a complete public base URL or `ADAPTER_PUBLIC_HOST` to a host that the sandboxes can reach.
 
 ## Dataset Format
 
@@ -171,7 +171,8 @@ contract (read inside `slime/agent/`); `SWE_*` are this SWE example's task knobs
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `ADAPTER_PUBLIC_HOST` | `${MASTER_ADDR}` | Public IP the sandbox uses to reach the Anthropic adapter. **Must be routable from inside the sandbox.** |
+| `ADAPTER_PUBLIC_URL` | unset | Complete public adapter base URL. Takes precedence over host-based and automatic Iris publication. |
+| `ADAPTER_PUBLIC_HOST` | unset | Host the sandbox uses to reach the adapter outside Iris. When neither public setting is present, Slime publishes the adapter through Iris automatically. |
 | `ADAPTER_BIND_HOST` / `ADAPTER_PORT` | `0.0.0.0` / `18001` | Bind address of the Anthropic adapter on the host. |
 | `E2B_API_KEY` | — | E2B (or compatible) API key. |
 | `DAYTONA_API_KEY` | — | Daytona API key when `SLIME_AGENT_SANDBOX_BACKEND=daytona`. |

@@ -31,12 +31,13 @@ import logging
 import os
 import shlex
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple
 
 from slime.agent import sandbox as agent_sandbox
 from slime.agent.adapters.common import flatten_content
-from slime.agent.sandbox import Sandbox, create_sandbox, exec_and_wait
+from slime.agent.sandbox import Sandbox, create_sandbox, exec_and_wait, output_files_error
 from slime.utils.types import Sample
 
 try:
@@ -158,30 +159,7 @@ def evaluability_check(md: dict) -> str | None:
         return _evaluability_check_swebench(md)
     if md.get("looks_swebench"):
         return "protocol_row_mismatch:looks_swebench"
-    return _output_files_error(md.get("output_files"))
-
-
-def _output_files_error(output_files: Any) -> str | None:
-    if not isinstance(output_files, (list, tuple)):
-        return "output_files_must_be_a_list"
-    seen: set[str] = set()
-    for value in output_files:
-        if not isinstance(value, str):
-            return "output_file_must_be_a_string"
-        path = PurePosixPath(value)
-        if (
-            not value
-            or "\0" in value
-            or path.is_absolute()
-            or path.as_posix() != value
-            or value == "."
-            or ".." in path.parts
-        ):
-            return f"invalid_output_file:{value!r}"
-        if value in seen:
-            return f"duplicate_output_file:{value!r}"
-        seen.add(value)
-    return None
+    return output_files_error(md.get("output_files"))
 
 
 def _evaluability_check_swebench(md: dict) -> str | None:
@@ -263,7 +241,7 @@ async def git_diff(sb: Sandbox, workdir: str) -> str:
     return out
 
 
-async def capture_output_files(sb: Sandbox, workdir: str, paths: list[str] | tuple[str, ...]) -> dict[str, str]:
+async def capture_output_files(sb: Sandbox, workdir: str, paths: Sequence[str]) -> dict[str, str]:
     """Read declared text outputs that resolve to regular files below workdir."""
     captured: dict[str, str] = {}
     for relative_path in paths:
@@ -298,9 +276,9 @@ async def run_evaluation(
 ) -> EvalResult:
     """Uniform entry point: dispatch to the protocol's grader.
 
-    No-test-cheating guarantee (both grading protocols): the eval sandbox is built from
-    the same image but starts CLEAN, so only the model-produced diff affects
-    reward."""
+    No-test-cheating guarantee (both grading protocols): the eval sandbox is built
+    from the same image but starts clean. Only the model-produced diff and explicitly
+    declared output files affect reward."""
     if md.get("protocol") == PROTOCOL_SWEBENCH:
         return await _grade_swebench(md, diff_text, timeout_sec)
     return await _grade_scaleswe(md, diff_text, timeout_sec, output_files or {})

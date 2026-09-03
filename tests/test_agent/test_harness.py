@@ -137,6 +137,7 @@ def test_claude_code_launch_command_and_env():
         env = captured["env"]
         assert env["ANTHROPIC_BASE_URL"] == "http://host:18001"
         assert env["ANTHROPIC_AUTH_TOKEN"] == "sess-cc"
+        assert env["ANTHROPIC_API_KEY"] == "sess-cc"
         assert env["ANTHROPIC_MODEL"] == "slime-actor"
         assert env["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 

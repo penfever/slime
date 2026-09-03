@@ -16,6 +16,14 @@ class FakeCreateParams:
         self.values = values
 
 
+class DaytonaConnectionError(Exception):
+    pass
+
+
+class TransientStatusError(Exception):
+    status_code = 503
+
+
 class FakeFileSystem:
     def __init__(self):
         self.files = {}
@@ -226,18 +234,20 @@ def test_daytona_exec_reports_results_and_honors_check(fake_daytona):
     assert client.remote.process.commands[0] == ("echo ok", {"NAME": "value"}, 9)
 
 
-def test_daytona_retries_connection_errors_without_http_status(fake_daytona, monkeypatch):
+@pytest.mark.parametrize(
+    "error_type",
+    [DaytonaConnectionError, TransientStatusError],
+    ids=["connection-error-name", "transient-http-status"],
+)
+def test_daytona_retries_only_replay_safe_commands(fake_daytona, monkeypatch, error_type):
     client, _ = fake_daytona
-
-    class DaytonaConnectionError(Exception):
-        pass
 
     async def no_wait(_seconds):
         return None
 
     monkeypatch.setattr(sandbox_module.asyncio, "sleep", no_wait)
     client.remote.process.responses = [
-        DaytonaConnectionError("connection reset by peer"),
+        error_type("transient failure"),
         SimpleNamespace(exit_code=0, result="ok"),
     ]
 
@@ -247,32 +257,13 @@ def test_daytona_retries_connection_errors_without_http_status(fake_daytona, mon
 
     assert asyncio.run(idempotent_command()) == (0, "ok", "")
 
-
-def test_daytona_retries_only_replay_safe_commands(fake_daytona, monkeypatch):
-    client, _ = fake_daytona
-
-    class TransientError(Exception):
-        status_code = 503
-
-    async def no_wait(_seconds):
-        return None
-
-    monkeypatch.setattr(sandbox_module.asyncio, "sleep", no_wait)
-    client.remote.process.responses = [TransientError("unavailable"), SimpleNamespace(exit_code=0, result="ok")]
-
-    async def idempotent_command():
-        async with DaytonaSandbox(image="image", rpc_retries=2) as sandbox:
-            return await sandbox.exec("test -f /tmp/ready", idempotent=True)
-
-    assert asyncio.run(idempotent_command()) == (0, "ok", "")
-
-    client.remote.process.responses = [TransientError("unavailable"), SimpleNamespace(exit_code=0, result="wrong")]
+    client.remote.process.responses = [error_type("transient failure"), SimpleNamespace(exit_code=0, result="wrong")]
 
     async def non_idempotent_command():
         async with DaytonaSandbox(image="image", rpc_retries=2) as sandbox:
             await sandbox.exec("start-job", idempotent=False)
 
-    with pytest.raises(TransientError):
+    with pytest.raises(error_type):
         asyncio.run(non_idempotent_command())
     assert len(client.remote.process.responses) == 1
 

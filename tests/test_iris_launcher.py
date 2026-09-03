@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
+import sys
 
+import fsspec
 import pytest
 
+from infra.iris.file_transfer import S3Input, run as run_file_transfer
 from infra.iris.launcher import IrisLaunchSpec, LaunchConfigError, run
 
 
@@ -59,6 +62,101 @@ def test_multinode_dry_run_uses_rank_aware_ray_runtime(tmp_path, capsys):
     assert rendered["nodes"] == 5
     assert rendered["task_command"][-2:] == ["python", "train.py"]
     assert rendered["task_command"][:3] == ["python", "-m", "infra.iris.ray_runtime"]
+
+
+def test_multinode_s3_inputs_materialize_before_ray(tmp_path, capsys):
+    exit_code = run(
+        [
+            "--cluster",
+            "cw-rno2a",
+            "--task-image",
+            "image",
+            "--nodes",
+            "5",
+            "--rendezvous-dir",
+            "s3://experiments/slime-test",
+            "--s3-input",
+            "s3://assets/model=/app/model",
+            "--workspace",
+            str(tmp_path),
+            "--dry-run",
+            "--",
+            "python",
+            "train.py",
+        ]
+    )
+
+    rendered = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert rendered["s3_inputs"] == ["s3://assets/model=/app/model"]
+    assert rendered["task_command"] == [
+        "python",
+        "-m",
+        "infra.iris.file_transfer",
+        "--s3-input",
+        "s3://assets/model=/app/model",
+        "--",
+        "python",
+        "-m",
+        "infra.iris.ray_runtime",
+        "--rendezvous-dir",
+        "s3://experiments/slime-test",
+        "--",
+        "python",
+        "train.py",
+    ]
+
+
+def test_s3_input_tree_replaces_destination_before_command(tmp_path, monkeypatch):
+    filesystem = fsspec.filesystem("memory")
+    filesystem.pipe("bucket/assets/model/config.json", b'{"model": "qwen"}')
+    filesystem.pipe("bucket/assets/data/train.jsonl", b"one\ntwo\n")
+    monkeypatch.setattr(fsspec.core, "url_to_fs", lambda _source: (filesystem, "bucket/assets"))
+    destination = tmp_path / "assets"
+    destination.mkdir()
+    (destination / "stale.txt").write_text("stale")
+
+    exit_code = run_file_transfer(
+        [
+            "--s3-input",
+            f"s3://bucket/assets={destination}",
+            "--",
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import sys; root = Path(sys.argv[1]); "
+                "assert (root / 'model/config.json').read_text() == '{\"model\": \"qwen\"}'; "
+                "assert (root / 'data/train.jsonl').read_text() == 'one\\ntwo\\n'; "
+                "assert not (root / 'stale.txt').exists()"
+            ),
+            str(destination),
+        ]
+    )
+
+    assert exit_code == 0
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        "s3://bucket=/app/assets",
+        "s3://bucket/assets=relative/path",
+        "s3://bucket/assets=/",
+    ],
+)
+def test_s3_input_rejects_unsafe_transfer_boundaries(assignment):
+    with pytest.raises(ValueError):
+        S3Input.parse(assignment)
+
+
+def test_spec_rejects_overlapping_s3_input_destinations():
+    with pytest.raises(LaunchConfigError, match="must not overlap"):
+        base_spec(
+            s3_inputs=(
+                S3Input.parse("s3://assets/model=/app/assets"),
+                S3Input.parse("s3://assets/config=/app/assets/config"),
+            )
+        ).validate()
 
 
 def test_spec_requires_exactly_one_controller_selection():

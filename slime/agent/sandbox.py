@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 ExecResult = tuple[int, str, str]
 FileContent = str | bytes | Path
 _RpcResult = TypeVar("_RpcResult")
+_DAYTONA_INSTANCE_LABEL = "slime.instance"
 
 
 @runtime_checkable
@@ -549,7 +550,7 @@ class DaytonaSandbox:
             "network_block_all": self.network_block_all,
             "ephemeral": True,
             "os_user": "root",
-            "labels": {"slime.instance": self._instance_label},
+            "labels": {_DAYTONA_INSTANCE_LABEL: self._instance_label},
         }
         if self.snapshot is not None:
             params = sdk.CreateSandboxFromSnapshotParams(snapshot=self.snapshot, **common_params)
@@ -593,7 +594,7 @@ class DaytonaSandbox:
 
     async def _reap_orphaned_sandboxes(self, sdk: Any) -> None:
         """Best-effort cleanup scoped to this creation's unique label."""
-        query = sdk.ListSandboxesQuery(labels={"slime.instance": self._instance_label})
+        query = sdk.ListSandboxesQuery(labels={_DAYTONA_INSTANCE_LABEL: self._instance_label})
         for attempt in range(6):
             try:
                 orphans = [sandbox async for sandbox in self._client.list(query)]
@@ -645,11 +646,20 @@ class DaytonaSandbox:
             raise RuntimeError("Daytona sandbox is not running")
         try:
             content = await self._rpc_retry("read_file", lambda: self._sb.fs.download_file(sandbox_path))
-        except Exception:
-            return ""
+        except Exception as error:
+            if self._is_not_found_error(error):
+                return ""
+            raise
         if content is None:
             return ""
         return content.decode(errors="replace") if isinstance(content, bytes) else str(content)
+
+    @staticmethod
+    def _is_not_found_error(error: BaseException) -> bool:
+        if type(error).__name__ == "DaytonaNotFoundError" or getattr(error, "status_code", None) == 404:
+            return True
+        response = getattr(error, "response", None)
+        return getattr(response, "status_code", None) == 404
 
 
 def _daytona_sdk() -> Any:

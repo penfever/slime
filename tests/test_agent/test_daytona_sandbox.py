@@ -178,6 +178,31 @@ def test_daytona_file_round_trip_preserves_text_bytes_and_host_files(fake_dayton
     assert client.remote.deleted
 
 
+def test_daytona_read_distinguishes_missing_files_from_provider_failures(fake_daytona):
+    client, _ = fake_daytona
+
+    class MissingFileError(Exception):
+        status_code = 404
+
+    class AuthenticationError(Exception):
+        status_code = 401
+
+    responses = [MissingFileError("missing"), AuthenticationError("invalid token")]
+
+    async def download_file(_source):
+        raise responses.pop(0)
+
+    client.remote.fs.download_file = download_file
+
+    async def exercise():
+        async with DaytonaSandbox(image="image") as sandbox:
+            assert await sandbox.read_file("/tmp/missing") == ""
+            with pytest.raises(AuthenticationError):
+                await sandbox.read_file("/tmp/private")
+
+    asyncio.run(exercise())
+
+
 def test_daytona_exec_reports_results_and_honors_check(fake_daytona):
     client, _ = fake_daytona
     client.remote.process.responses = [

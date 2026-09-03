@@ -6,6 +6,7 @@ from functools import cache
 from ipaddress import ip_address
 from typing import Any
 
+import psutil
 import torch
 
 from slime.utils.http_utils import is_port_available
@@ -109,8 +110,6 @@ def get_current_node_ip():
 
 def get_network_interface_for_ip(address: str) -> str:
     """Return the local interface that owns ``address``."""
-    import psutil
-
     target = ip_address(address)
     for interface, interface_addresses in psutil.net_if_addrs().items():
         for candidate in interface_addresses:

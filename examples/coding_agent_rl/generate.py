@@ -18,6 +18,7 @@ and produces the md dict consumed below.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import os
 import random
@@ -32,6 +33,7 @@ from typing import Any
 from slime.agent.adapters import AnthropicAdapter, OpenAIAdapter
 from slime.agent.aiohttp_threaded import FilteredAccessLogger, run_app_in_thread
 from slime.agent.harness import ClaudeCodeHarness, CodexHarness
+from slime.agent.iris_endpoint import IrisEndpoint, publish_iris_endpoint
 from slime.agent.sandbox import Sandbox, create_sandbox
 from slime.utils.misc import SingletonMeta
 from slime.utils.processing_utils import load_tokenizer
@@ -57,6 +59,7 @@ class SweConfig:
     eval_protocol: str  # eval-path schema/grader (SWE_EVAL_PROTOCOL)
     train_protocol: str  # train-path schema/grader (SWE_TRAIN_PROTOCOL)
     adapter_public_host: str | None
+    adapter_public_url: str | None
     adapter_bind_host: str
     adapter_port: int
     fork_merge_threshold: int | None
@@ -76,6 +79,7 @@ class SweConfig:
             eval_protocol=os.environ.get("SWE_EVAL_PROTOCOL", swe.PROTOCOL_SCALESWE),
             train_protocol=os.environ.get("SWE_TRAIN_PROTOCOL", swe.PROTOCOL_SCALESWE),
             adapter_public_host=os.environ.get("ADAPTER_PUBLIC_HOST"),
+            adapter_public_url=os.environ.get("ADAPTER_PUBLIC_URL"),
             adapter_bind_host=os.environ.get("ADAPTER_BIND_HOST", "0.0.0.0"),
             adapter_port=int(os.environ.get("ADAPTER_PORT", "18001")),
             fork_merge_threshold=fork,
@@ -141,12 +145,6 @@ class _AdapterService(metaclass=SingletonMeta):
         self.tool_parser = getattr(args, "sglang_tool_call_parser", None) or None
         self.reasoning_parser = getattr(args, "sglang_reasoning_parser", None) or None
         sglang_url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}"
-        if not CONFIG.adapter_public_host:
-            raise RuntimeError(
-                "ADAPTER_PUBLIC_HOST is not set. Export it to the host IP that "
-                "sandboxes can reach for reverse-connection to the adapter; "
-                "without it the sandbox cannot dial back and the rollout aborts."
-            )
         self.adapter = ADAPTER_CLS(
             tokenizer=self.tokenizer,
             sglang_url=sglang_url,
@@ -168,15 +166,41 @@ class _AdapterService(metaclass=SingletonMeta):
                 "access_log_class": FilteredAccessLogger,
             },
         )
-        self.adapter_url = f"http://{CONFIG.adapter_public_host}:{self.app_handle.port}"
+        self.iris_endpoint: IrisEndpoint | None = None
+        if CONFIG.adapter_public_url:
+            self._adapter_url = CONFIG.adapter_public_url.rstrip("/")
+        elif CONFIG.adapter_public_host:
+            self._adapter_url = f"http://{CONFIG.adapter_public_host}:{self.app_handle.port}"
+        else:
+            try:
+                self.iris_endpoint = publish_iris_endpoint(self.app_handle.port)
+                _ = self.iris_endpoint.public_url  # Fail startup if the capability cannot be minted.
+                self._adapter_url = None
+            except BaseException:
+                self.app_handle.stop()
+                raise
+        atexit.register(self.close)
         logger.info(
-            "[coding_agent_rl] tokenizer=%s adapter=%s max_context_len=%s tool_parser=%s reasoning_parser=%s",
+            "[coding_agent_rl] tokenizer=%s adapter_publication=%s max_context_len=%s "
+            "tool_parser=%s reasoning_parser=%s",
             args.hf_checkpoint,
-            self.adapter_url,
+            "iris-capability" if self.iris_endpoint else "explicit-url",
             self.max_context_len,
             self.tool_parser,
             self.reasoning_parser,
         )
+
+    @property
+    def adapter_url(self) -> str:
+        if self.iris_endpoint is not None:
+            return self.iris_endpoint.public_url
+        assert self._adapter_url is not None
+        return self._adapter_url
+
+    def close(self) -> None:
+        if self.iris_endpoint is not None:
+            self.iris_endpoint.close()
+        self.app_handle.stop()
 
 
 async def generate(args, base_sample: Sample, sampling_params: dict[str, Any], evaluation: bool = False):

@@ -245,6 +245,7 @@ def test_generate_aborts_on_empty_trajectory():
 
         assert len(samples) == 1
         assert samples[0].status == Sample.Status.ABORTED
+        assert samples[0].rollout_id == samples[0].index == 0
         assert samples[0].metadata.get("abort_reason") == "adapter_session_empty"
 
     with pytest.MonkeyPatch.context() as mp:

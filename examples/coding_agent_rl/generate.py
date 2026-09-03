@@ -344,6 +344,8 @@ def _session_id(sample: Sample, instance_id: str) -> str:
 def _abort_result(sample: Sample, reason: str, instance_id: str) -> list[Sample]:
     """Mark ``sample`` aborted in place and return it in the list shape this
     fan-out generate function always yields."""
+    if sample.rollout_id is None:
+        sample.rollout_id = sample.index
     sample.tokens = [0, 0]
     sample.response = ""
     sample.response_length = 1

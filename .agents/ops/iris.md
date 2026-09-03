@@ -20,6 +20,12 @@ uv run --with 'marin-iris @ git+https://github.com/marin-community/marin.git#sub
 Keep credentials in the local environment and forward only their names with
 `--secret-env`.
 
+Large immutable inputs should live in the cluster's S3 region instead of the Iris
+workspace bundle. Map each object or prefix to an absolute node-local path with a
+repeatable `--s3-input s3://bucket/path=/local/path`. Every replica downloads and
+size-checks the input into a temporary sibling path, then atomically replaces the
+destination before Ray starts. The task image must provide `fsspec` and `s3fs`.
+
 Always inspect a dry run first:
 
 ```bash
@@ -28,6 +34,7 @@ python -m infra.iris.launcher \
   --task-image registry.example/slime@sha256:<digest> \
   --job-name slime-smoke \
   --gpus-per-node 8 \
+  --s3-input s3://marin-us-east-02a/models/example=/app/model \
   --secret-env WANDB_API_KEY \
   --dry-run \
   -- bash -lc 'nvidia-smi && python -c "import slime, ray, torch; print(torch.cuda.device_count())"'

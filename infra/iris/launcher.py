@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Protocol
 from collections.abc import Sequence
 
+from infra.iris.file_transfer import S3Input, parse_s3_input_argument
+
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _JOB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -63,6 +65,7 @@ class IrisLaunchSpec:
     secret_env_names: tuple[str, ...] = ()
     setup_commands: tuple[str, ...] = ()
     rendezvous_dir: str | None = None
+    s3_inputs: tuple[S3Input, ...] = ()
 
     def validate(self) -> None:
         if not _JOB_NAME.fullmatch(self.job_name) or "/" in self.job_name:
@@ -114,6 +117,13 @@ class IrisLaunchSpec:
         invalid_names = [name for name in (*self.env, *self.secret_env_names) if not _ENV_NAME.fullmatch(name)]
         if invalid_names:
             raise LaunchConfigError(f"invalid environment variable names: {', '.join(invalid_names)}")
+        destinations = [item.destination for item in self.s3_inputs]
+        if len(destinations) != len(set(destinations)):
+            raise LaunchConfigError("S3 input destinations must be unique")
+        for index, destination in enumerate(destinations):
+            for other in destinations[index + 1 :]:
+                if destination in other.parents or other in destination.parents:
+                    raise LaunchConfigError("S3 input destinations must not overlap")
 
     def resolved_env(self, environ: dict[str, str] | None = None) -> dict[str, str]:
         """Resolve explicitly named secrets without mutating or printing them."""
@@ -131,21 +141,28 @@ class IrisLaunchSpec:
         rendered["env"] = sorted(self.env)
         rendered["secret_env_names"] = list(self.secret_env_names)
         rendered["setup_commands"] = list(self.setup_commands)
+        rendered["s3_inputs"] = [item.as_assignment() for item in self.s3_inputs]
         rendered["task_command"] = list(self.task_command())
         return rendered
 
     def task_command(self) -> tuple[str, ...]:
-        if self.nodes == 1:
-            return self.command
-        return (
-            "python",
-            "-m",
-            "infra.iris.ray_runtime",
-            "--rendezvous-dir",
-            self.rendezvous_dir or "",
-            "--",
-            *self.command,
+        command = self.command
+        if self.nodes > 1:
+            command = (
+                "python",
+                "-m",
+                "infra.iris.ray_runtime",
+                "--rendezvous-dir",
+                self.rendezvous_dir or "",
+                "--",
+                *command,
+            )
+        if not self.s3_inputs:
+            return command
+        transfer_arguments = tuple(
+            argument for item in self.s3_inputs for argument in ("--s3-input", item.as_assignment())
         )
+        return "python", "-m", "infra.iris.file_transfer", *transfer_arguments, "--", *command
 
 
 class LaunchBackend(Protocol):
@@ -290,6 +307,14 @@ def create_parser() -> argparse.ArgumentParser:
         default=[],
         help="task setup command; defaults to no setup because the image must be self-contained",
     )
+    parser.add_argument(
+        "--s3-input",
+        action="append",
+        type=parse_s3_input_argument,
+        default=[],
+        metavar="S3_URI=ABSOLUTE_PATH",
+        help="atomically materialize an S3 object or prefix on every task before Ray starts",
+    )
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--dry-run", action="store_true", help="validate and print a redacted request")
     parser.add_argument("--no-wait", action="store_true", help="return immediately after submission")
@@ -330,6 +355,7 @@ def spec_from_args(args: argparse.Namespace) -> IrisLaunchSpec:
         secret_env_names=tuple(args.secret_env),
         setup_commands=tuple(args.setup_command),
         rendezvous_dir=args.rendezvous_dir,
+        s3_inputs=tuple(args.s3_input),
     )
     spec.validate()
     return spec

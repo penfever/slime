@@ -142,10 +142,20 @@ timeout_sec = 900
         )
     )
 
-    row = convert_task(task, ConversionOverrides(snapshot="calendar-v3"))
+    row = convert_task(task, ConversionOverrides(snapshot="calendar-v3", output_files=("answer.txt",)))
 
     assert row["metadata"]["snapshot"] == "calendar-v3"
+    assert row["metadata"]["output_files"] == ["answer.txt"]
     assert "image" not in row["metadata"]
+
+
+def test_output_file_must_stay_below_workdir(tmp_path: Path) -> None:
+    task = _write_task(tmp_path)
+
+    with pytest.raises(UnsupportedHarborTaskError) as caught:
+        convert_task(task, ConversionOverrides(output_files=("../answer.txt",)))
+
+    assert caught.value.features == ("sandbox output file",)
 
 
 def test_artifact_and_service_features_are_explicitly_rejected(tmp_path: Path) -> None:
@@ -209,11 +219,22 @@ def test_cli_can_skip_unsupported_tasks(tmp_path: Path) -> None:
         config.write("\n[environment.tpu]\ntype = 'v6e'\ntopology = '2x4'\n")
     output = tmp_path / "tasks.jsonl"
 
-    return_code = main([str(supported), str(unsupported), "--skip-unsupported", "--output", str(output)])
+    return_code = main(
+        [
+            str(supported),
+            str(unsupported),
+            "--output-file",
+            "answer.txt",
+            "--skip-unsupported",
+            "--output",
+            str(output),
+        ]
+    )
 
     assert return_code == 0
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert [row["label"] for row in rows] == ["demo/supported"]
+    assert rows[0]["metadata"]["output_files"] == ["answer.txt"]
 
 
 if __name__ == "__main__":

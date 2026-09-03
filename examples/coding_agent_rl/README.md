@@ -37,6 +37,7 @@ Standard slime JSONL with three keys:
     "image": "your-registry/swe-image:<tag>",  // sandbox image reference; omit when using snapshot
     "snapshot": "optional-daytona-snapshot",    // Daytona only; mutually exclusive with image
     "workdir": "/workspace/<repo>",            // repo path inside the sandbox
+    "output_files": ["answer.txt"],             // optional text files copied into clean evaluation
     "problem_statement": "<issue body>",
     // exactly one of the following two graders:
     "swepro": { /* SWE-bench Pro test harness — preferred */ },
@@ -72,10 +73,15 @@ per-task override:
 python -m slime.agent.harbor_converter /path/to/tasks \
   --snapshot org/task=snapshot-id \
   --workdir org/task=/workspace/repo \
+  --output-file answer.txt \
   --output /path/to/slime-tasks.jsonl
 ```
 
-Image and workdir overrides use the same `TASK=VALUE` form. Conversion fails
+Image and workdir overrides use the same `TASK=VALUE` form. Repeat
+`--output-file` to transfer task-relative text outputs from the agent sandbox
+into the clean evaluator; the option applies uniformly to every converted task.
+Missing outputs remain absent. Absolute paths, traversal, duplicate paths, and
+source or destination symlink escapes are rejected. Conversion fails
 with a list of unsupported semantics rather than silently discarding them.
 Unsupported features include multi-step and multi-container tasks, Dockerfile
 builds without an image or snapshot override, separate verifier containers,

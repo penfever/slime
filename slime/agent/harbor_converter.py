@@ -69,6 +69,7 @@ class ConversionOverrides:
     image: str | None = None
     snapshot: str | None = None
     workdir: str | None = None
+    output_files: tuple[str, ...] = ()
 
 
 def strip_canary(text: str) -> str:
@@ -134,6 +135,13 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
         reasons.append(
             "environment.workdir: provide an absolute path containing only letters, digits, '.', '_', '-', and '/'"
         )
+    for output_file in overrides.output_files:
+        if not _safe_output_file(output_file):
+            reasons.append(
+                f"sandbox output file: {output_file!r} must be a normalized relative path below the workdir"
+            )
+    if len(overrides.output_files) != len(set(overrides.output_files)):
+        reasons.append("sandbox output files: duplicate paths are not allowed")
 
     instruction_path = task_dir / "instruction.md"
     test_script = task_dir / "tests" / "test.sh"
@@ -175,6 +183,8 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
         metadata["image"] = image
     else:
         metadata["snapshot"] = snapshot
+    if overrides.output_files:
+        metadata["output_files"] = list(overrides.output_files)
 
     setup_files = task_dir / "setup_files"
     if setup_files.is_dir() and any(setup_files.iterdir()):
@@ -220,6 +230,13 @@ def _task_name(config: dict[str, Any], task_dir: Path) -> str:
 def _safe_workdir(workdir: str) -> bool:
     path = PurePosixPath(workdir)
     return bool(_SAFE_WORKDIR_RE.fullmatch(workdir)) and ".." not in path.parts and workdir != "/"
+
+
+def _safe_output_file(value: Any) -> bool:
+    if not isinstance(value, str) or not value or "\0" in value:
+        return False
+    path = PurePosixPath(value)
+    return not path.is_absolute() and path.as_posix() == value and value != "." and ".." not in path.parts
 
 
 def _verifier_timeout(config: dict[str, Any]) -> float:
@@ -434,6 +451,13 @@ def main(argv: list[str] | None = None) -> int:
         "--workdir", action="append", default=[], metavar="TASK=PATH", help="override a workdir by task name"
     )
     parser.add_argument(
+        "--output-file",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="transfer a task-relative text file into the clean evaluator; repeat for multiple files",
+    )
+    parser.add_argument(
         "--skip-unsupported", action="store_true", help="report unsupported tasks and write the remaining rows"
     )
     args = parser.parse_args(argv)
@@ -461,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
                 image=maps["image"].get(name),
                 snapshot=maps["snapshot"].get(name),
                 workdir=maps["workdir"].get(name),
+                output_files=tuple(args.output_file),
             )
             try:
                 rows.append(convert_task(task_dir, overrides))

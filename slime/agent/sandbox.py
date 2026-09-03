@@ -442,6 +442,7 @@ class DaytonaSandbox:
             "ClientConnectionError",
             "ConnectError",
             "ConnectTimeout",
+            "DaytonaConnectionError",
             "DaytonaRateLimitError",
             "DaytonaTimeoutError",
             "ReadError",

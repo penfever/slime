@@ -405,22 +405,31 @@ def _parse_assignments(values: list[str], option: str) -> dict[str, str]:
     return assignments
 
 
-def _write_rows(rows: list[dict[str, Any]], output: str) -> None:
-    content = "".join(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n" for row in rows)
+def write_rows(rows: Iterable[dict[str, Any]], output: str | Path) -> int:
+    """Write JSONL rows atomically when output is a path and return the count."""
+    count = 0
     if output == "-":
-        sys.stdout.write(content)
-    else:
-        output_path = Path(output)
-        temporary_path: Path | None = None
-        try:
-            with tempfile.NamedTemporaryFile("w", dir=output_path.parent, delete=False) as stream:
-                stream.write(content)
-                temporary_path = Path(stream.name)
-            os.replace(temporary_path, output_path)
-        except OSError as exc:
-            if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
-            raise HarborConversionError(f"Could not write {output_path}: {exc}") from exc
+        for row in rows:
+            sys.stdout.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
+            count += 1
+        return count
+
+    output_path = Path(output)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=output_path.parent, delete=False) as stream:
+            temporary_path = Path(stream.name)
+            for row in rows:
+                stream.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
+                count += 1
+        os.replace(temporary_path, output_path)
+        temporary_path = None
+    except OSError as exc:
+        raise HarborConversionError(f"Could not write {output_path}: {exc}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return count
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -485,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
             raise HarborConversionError("\n".join(str(failure) for failure in failures))
         for failure in failures:
             print(failure, file=sys.stderr)
-        _write_rows(rows, args.output)
+        write_rows(rows, args.output)
         return 0
     except HarborConversionError as exc:
         print(exc, file=sys.stderr)

@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import argparse
 import io
-import json
-import os
 import tarfile
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from slime.agent.harbor_converter import ConversionOverrides, HarborConversionError, convert_task
+from slime.agent.harbor_converter import ConversionOverrides, HarborConversionError, convert_task, write_rows
 
 
 def _safe_members(archive: tarfile.TarFile) -> Iterator[tarfile.TarInfo]:
@@ -51,6 +49,25 @@ def _extract_task(archive: tarfile.TarFile, task_dir: Path) -> None:
         destination.chmod(member.mode & 0o777)
 
 
+def _convert_source(source: dict[str, Any], overrides: ConversionOverrides, seen: set[str]) -> dict[str, Any]:
+    name = _archive_name(source["path"])
+    if name in seen:
+        raise HarborConversionError(f"TaskTrove archive name is not unique: {name!r}")
+    seen.add(name)
+    payload = source["task_binary"]
+    if not isinstance(payload, bytes):
+        raise HarborConversionError(f"TaskTrove task_binary for {name!r} is not bytes")
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        task_dir = Path(temporary_dir) / name
+        task_dir.mkdir()
+        try:
+            with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+                _extract_task(archive, task_dir)
+        except tarfile.TarError as error:
+            raise HarborConversionError(f"Could not extract TaskTrove archive {name!r}: {error}") from error
+        return convert_task(task_dir, overrides)
+
+
 def convert_tasktrove_parquet(
     parquet_path: Path,
     output_path: Path,
@@ -68,41 +85,15 @@ def convert_tasktrove_parquet(
     if missing:
         raise HarborConversionError(f"TaskTrove parquet is missing columns: {', '.join(sorted(missing))}")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: Path | None = None
     seen: set[str] = set()
-    count = 0
-    try:
-        with tempfile.NamedTemporaryFile("w", dir=output_path.parent, delete=False) as stream:
-            temporary_path = Path(stream.name)
-            for batch in parquet.iter_batches(columns=["path", "task_binary"]):
-                for source in batch.to_pylist():
-                    name = _archive_name(source["path"])
-                    if name in seen:
-                        raise HarborConversionError(f"TaskTrove archive name is not unique: {name!r}")
-                    seen.add(name)
-                    payload = source["task_binary"]
-                    if not isinstance(payload, bytes):
-                        raise HarborConversionError(f"TaskTrove task_binary for {name!r} is not bytes")
-                    with tempfile.TemporaryDirectory() as temporary_dir:
-                        task_dir = Path(temporary_dir) / name
-                        task_dir.mkdir()
-                        try:
-                            with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
-                                _extract_task(archive, task_dir)
-                        except tarfile.TarError as error:
-                            raise HarborConversionError(f"Could not extract TaskTrove archive {name!r}: {error}") from error
-                        row = convert_task(task_dir, overrides)
-                    stream.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False) + "\n")
-                    count += 1
-        os.replace(temporary_path, output_path)
-    except (OSError, HarborConversionError) as error:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
-        if isinstance(error, HarborConversionError):
-            raise
-        raise HarborConversionError(f"Could not write {output_path}: {error}") from error
-    return count
+
+    def rows() -> Iterator[dict[str, Any]]:
+        for batch in parquet.iter_batches(columns=["path", "task_binary"]):
+            for source in batch.to_pylist():
+                yield _convert_source(source, overrides, seen)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return write_rows(rows(), output_path)
 
 
 def main(argv: list[str] | None = None) -> int:

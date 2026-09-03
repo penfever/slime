@@ -15,7 +15,8 @@ diff is scored. Everything sandbox-side (prepare_workspace / git_diff /
 apply_diff / pre_commands) is shared and lives here once.
 ``get_metadata(sample, protocol)`` produces the ``md`` dict; the
 protocol-specific grading payload is carried under ``md["grading"]``
-and is opaque to generate.py (which only reads instance_id / image / workdir).
+and is opaque to generate.py (which reads only orchestration fields such as
+instance_id, image, workdir, and output_files).
 
 Harness-agnostic on purpose -- nothing here is Claude-specific. ``SWE_PROMPT`` is
 the task instruction (semantics, not CLI syntax). The only place a task meets a
@@ -168,7 +169,14 @@ def _output_files_error(output_files: Any) -> str | None:
         if not isinstance(value, str):
             return "output_file_must_be_a_string"
         path = PurePosixPath(value)
-        if not value or path.is_absolute() or path.as_posix() != value or value == "." or ".." in path.parts:
+        if (
+            not value
+            or "\0" in value
+            or path.is_absolute()
+            or path.as_posix() != value
+            or value == "."
+            or ".." in path.parts
+        ):
             return f"invalid_output_file:{value!r}"
         if value in seen:
             return f"duplicate_output_file:{value!r}"
@@ -258,19 +266,28 @@ async def git_diff(sb: Sandbox, workdir: str) -> str:
 async def capture_output_files(sb: Sandbox, workdir: str, paths: list[str] | tuple[str, ...]) -> dict[str, str]:
     """Read declared text outputs that resolve to regular files below workdir."""
     captured: dict[str, str] = {}
-    root_arg = shlex.quote(workdir)
     for relative_path in paths:
         sandbox_path = f"{workdir}/{relative_path}"
         path_arg = shlex.quote(sandbox_path)
         command = (
-            f"root=$(realpath -e -- {root_arg}) && candidate=$(realpath -e -- {path_arg}) && "
-            'case "$candidate" in "$root"/*) test -f "$candidate" && test ! -L '
-            f"{path_arg} ;; *) exit 1 ;; esac"
+            _containment_guard(workdir, sandbox_path, allow_missing=False)
+            + f' && test -f "$candidate" && test ! -L {path_arg}'
         )
         exit_code, _, _ = await sb.exec(command, user="agent", check=False, timeout=30)
         if exit_code == 0:
             captured[relative_path] = await sb.read_file(sandbox_path, user="agent")
     return captured
+
+
+def _containment_guard(workdir: str, sandbox_path: str, *, allow_missing: bool) -> str:
+    """Build a shell guard that resolves sandbox_path and confines it to workdir."""
+    root_arg = shlex.quote(workdir)
+    path_arg = shlex.quote(sandbox_path)
+    mode = "-m" if allow_missing else "-e"
+    return (
+        f"root=$(realpath -e -- {root_arg}) && candidate=$(realpath {mode} -- {path_arg}) && "
+        'case "$candidate" in "$root"|"$root"/*) ;; *) exit 1 ;; esac'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -332,18 +349,16 @@ async def _grade_scaleswe(md: dict, diff_text: str, timeout_sec: int, output_fil
 
 
 async def _materialize_output_files(ev: Sandbox, workdir: str, output_files: dict[str, str]) -> bool:
-    """Write captured outputs without allowing a snapshot symlink to escape workdir."""
-    root_arg = shlex.quote(workdir)
+    """Write captured outputs; return False if a target can escape workdir."""
     for relative_path, content in output_files.items():
         sandbox_path = f"{workdir}/{relative_path}"
         parent_arg = shlex.quote(str(PurePosixPath(sandbox_path).parent))
         path_arg = shlex.quote(sandbox_path)
         command = (
-            f"root=$(realpath -e -- {root_arg}) && parent=$(realpath -m -- {parent_arg}) && "
-            'case "$parent" in "$root"|"$root"/*) ;; *) exit 1 ;; esac && '
-            f"mkdir -p -- {parent_arg} && parent=$(realpath -e -- {parent_arg}) && "
-            'case "$parent" in "$root"|"$root"/*) test ! -L '
-            f"{path_arg} ;; *) exit 1 ;; esac"
+            _containment_guard(workdir, str(PurePosixPath(sandbox_path).parent), allow_missing=True)
+            + f" && mkdir -p -- {parent_arg} && "
+            + _containment_guard(workdir, str(PurePosixPath(sandbox_path).parent), allow_missing=False)
+            + f" && test ! -L {path_arg}"
         )
         exit_code, _, _ = await ev.exec(command, user="agent", check=False, timeout=30)
         if exit_code != 0:

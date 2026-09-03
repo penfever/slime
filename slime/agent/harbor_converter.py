@@ -1,9 +1,8 @@
-"""Convert the executable subset of Harbor tasks to Slime coding-agent JSONL.
+"""Convert supported Harbor task directories to Slime coding-agent JSONL.
 
-The converter intentionally targets the existing ``examples/coding_agent_rl``
-contract.  It does not teach the rollout path about Harbor.  Agent-visible
-setup files are materialized through ``pre_commands`` and verifier files are
-materialized through ``eval_cmd`` only in the clean evaluation sandbox.
+Call :func:`convert_task` for one row or use the module CLI for an atomic batch.
+Unsupported Harbor semantics raise :class:`UnsupportedHarborTaskError` with
+stable feature names and detailed explanations.
 """
 
 from __future__ import annotations
@@ -30,6 +29,11 @@ except ImportError:  # pragma: no cover - Python 3.10 only
 
 _CANARY_LINE_RE = re.compile(r"^(<!--.*canary.*-->|#.*canary.*)$", re.IGNORECASE)
 _SAFE_WORKDIR_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+_TASK_CONFIG_NAME = "task.toml"
+_HARBOR_SETUP_ROOT = "/setup_files"
+_DEFAULT_SCHEMA_VERSION = "1.2"
+_REWARD_JSON_NAME = "reward.json"
+_REWARD_TEXT_NAME = "reward.txt"
 _SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2"})
 _COMPOSE_NAMES = frozenset(
     {
@@ -53,6 +57,7 @@ class UnsupportedHarborTaskError(HarborConversionError):
     def __init__(self, task_dir: Path, reasons: Iterable[str]) -> None:
         self.task_dir = task_dir
         self.reasons = tuple(reasons)
+        self.features = tuple(reason.partition(":")[0] for reason in self.reasons)
         detail = "\n".join(f"  - {reason}" for reason in self.reasons)
         super().__init__(f"Harbor task {task_dir} is not convertible:\n{detail}")
 
@@ -84,16 +89,16 @@ def discover_task_dirs(paths: Iterable[Path]) -> list[Path]:
     tasks: set[Path] = set()
     for raw_path in paths:
         path = raw_path.resolve()
-        if path.is_file() and path.name == "task.toml":
+        if path.is_file() and path.name == _TASK_CONFIG_NAME:
             tasks.add(path.parent)
-        elif (path / "task.toml").is_file():
+        elif (path / _TASK_CONFIG_NAME).is_file():
             tasks.add(path)
         elif path.is_dir():
-            tasks.update(config.parent for config in path.rglob("task.toml"))
+            tasks.update(config.parent for config in path.rglob(_TASK_CONFIG_NAME))
         else:
             raise HarborConversionError(f"No Harbor task found at {raw_path}")
     if not tasks:
-        raise HarborConversionError("No Harbor task.toml files were found")
+        raise HarborConversionError(f"No Harbor {_TASK_CONFIG_NAME} files were found")
     return sorted(tasks, key=lambda task: task.as_posix())
 
 
@@ -148,7 +153,7 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
     setup_dir = f"{workdir}/.slime-harbor/setup_files"
     tests_dir = f"{workdir}/.slime-harbor/tests"
     logs_dir = f"{workdir}/.slime-harbor/logs"
-    prompt = prompt.replace("/setup_files", setup_dir)
+    prompt = prompt.replace(_HARBOR_SETUP_ROOT, setup_dir)
 
     metadata: dict[str, Any] = {
         "instance_id": name,
@@ -161,7 +166,7 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
             timeout_sec=_verifier_timeout(config),
         ),
         "harbor": {
-            "schema_version": str(config.get("schema_version", config.get("version", "1.2"))),
+            "schema_version": str(config.get("schema_version", config.get("version", _DEFAULT_SCHEMA_VERSION))),
             "metadata": _json_value(config.get("metadata", {})),
         },
     }
@@ -175,14 +180,14 @@ def convert_task(task_dir: Path, overrides: ConversionOverrides | None = None) -
         metadata["pre_commands"] = _build_materialize_command(
             setup_files,
             setup_dir,
-            replacements={b"/setup_files": setup_dir.encode()},
+            replacements={_HARBOR_SETUP_ROOT.encode(): setup_dir.encode()},
         )
 
     return {"prompt": prompt, "label": name, "metadata": metadata}
 
 
 def _read_config(task_dir: Path) -> dict[str, Any]:
-    config_path = task_dir / "task.toml"
+    config_path = task_dir / _TASK_CONFIG_NAME
     if not config_path.is_file():
         raise HarborConversionError(f"Missing {config_path}")
     try:
@@ -237,7 +242,7 @@ def _json_value(value: Any) -> Any:
 
 def _unsupported_reasons(task_dir: Path, config: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
-    schema_version = str(config.get("schema_version", config.get("version", "1.2")))
+    schema_version = str(config.get("schema_version", config.get("version", _DEFAULT_SCHEMA_VERSION)))
     if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
         reasons.append(f"schema_version: {schema_version!r} is not one of {sorted(_SUPPORTED_SCHEMA_VERSIONS)}")
     if config.get("steps"):
@@ -357,7 +362,7 @@ tests_dir = Path({tests_dir!r})
 logs_dir = Path({logs_dir!r})
 verifier_dir = logs_dir / "verifier"
 verifier_dir.mkdir(parents=True, exist_ok=True)
-for stale_reward in (verifier_dir / "reward.json", verifier_dir / "reward.txt"):
+for stale_reward in (verifier_dir / {_REWARD_JSON_NAME!r}, verifier_dir / {_REWARD_TEXT_NAME!r}):
     stale_reward.unlink(missing_ok=True)
 env = os.environ.copy()
 env["TEST_DIR"] = str(tests_dir)
@@ -367,8 +372,8 @@ except subprocess.TimeoutExpired:
     print("Harbor verifier timed out after {timeout_sec:g} seconds", file=sys.stderr)
     raise SystemExit(1)
 
-reward_json = verifier_dir / "reward.json"
-reward_text = verifier_dir / "reward.txt"
+reward_json = verifier_dir / {_REWARD_JSON_NAME!r}
+reward_text = verifier_dir / {_REWARD_TEXT_NAME!r}
 try:
     if reward_json.exists():
         value = json.loads(reward_json.read_text()).get("reward")

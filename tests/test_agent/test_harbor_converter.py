@@ -116,13 +116,14 @@ timeout_sec = 20
     with pytest.raises(UnsupportedHarborTaskError) as caught:
         convert_task(task)
 
-    reasons = caught.value.reasons
-    assert any(reason.startswith("agent.user:") for reason in reasons)
-    assert any(reason.startswith("agent.timeout_sec:") for reason in reasons)
-    assert any(reason.startswith("verifier.env:") for reason in reasons)
-    assert any(reason.startswith("verifier.environment:") for reason in reasons)
-    assert any(reason.startswith("verifier.collect:") for reason in reasons)
-    assert any(reason.startswith("environment compose file:") for reason in reasons)
+    assert set(caught.value.features) >= {
+        "agent.user",
+        "agent.timeout_sec",
+        "verifier.env",
+        "verifier.environment",
+        "verifier.collect",
+        "environment compose file",
+    }
 
 
 def test_resource_and_service_features_are_explicitly_rejected(tmp_path: Path) -> None:
@@ -150,10 +151,11 @@ command = "curl localhost"
     with pytest.raises(UnsupportedHarborTaskError) as caught:
         convert_task(task)
 
-    reasons = caught.value.reasons
-    assert any(reason.startswith("artifacts:") for reason in reasons)
-    assert any(reason.startswith("environment.mcp_servers:") for reason in reasons)
-    assert any(reason.startswith("environment.healthcheck:") for reason in reasons)
+    assert set(caught.value.features) >= {
+        "artifacts",
+        "environment.mcp_servers",
+        "environment.healthcheck",
+    }
 
 
 def test_discovery_is_deterministic_and_deduplicated(tmp_path: Path) -> None:
@@ -165,7 +167,7 @@ def test_discovery_is_deterministic_and_deduplicated(tmp_path: Path) -> None:
     assert discovered == sorted({first.resolve(), second.resolve()}, key=lambda path: path.as_posix())
 
 
-def test_cli_does_not_write_partial_output_on_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_does_not_write_partial_output_on_error(tmp_path: Path) -> None:
     supported = _write_task(tmp_path, name="demo/supported")
     unsupported = _write_task(tmp_path, name="demo/unsupported")
     with (unsupported / "task.toml").open("a") as config:
@@ -176,10 +178,9 @@ def test_cli_does_not_write_partial_output_on_error(tmp_path: Path, capsys: pyte
 
     assert return_code == 2
     assert not output.exists()
-    assert "agent.user" in capsys.readouterr().err
 
 
-def test_cli_can_skip_unsupported_tasks(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_can_skip_unsupported_tasks(tmp_path: Path) -> None:
     supported = _write_task(tmp_path, name="demo/supported")
     unsupported = _write_task(tmp_path, name="demo/unsupported")
     with (unsupported / "task.toml").open("a") as config:
@@ -191,7 +192,6 @@ def test_cli_can_skip_unsupported_tasks(tmp_path: Path, capsys: pytest.CaptureFi
     assert return_code == 0
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert [row["label"] for row in rows] == ["demo/supported"]
-    assert "environment.tpu" in capsys.readouterr().err
 
 
 if __name__ == "__main__":

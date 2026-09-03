@@ -759,6 +759,10 @@ jobs:
             },
             {
               "num_gpus": 0,
+              "test_file": "test_iris_launcher.py"
+            },
+            {
+              "num_gpus": 0,
               "test_file": "test_streaming_rollout.py"
             },
             {
@@ -898,6 +902,10 @@ jobs:
             {
               "num_gpus": 0,
               "test_file": "test_agent/test_sandbox_exec_and_wait.py"
+            },
+            {
+              "num_gpus": 0,
+              "test_file": "test_agent/test_daytona_sandbox.py"
             },
             {
               "num_gpus": 0,

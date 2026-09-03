@@ -94,7 +94,7 @@ def fake_daytona(monkeypatch):
     [
         (DaytonaSandbox(image="registry.example/task:1"), "ImageParams", "image", "registry.example/task:1"),
         (
-            create_sandbox(None, snapshot="snapshot-123", backend="daytona"),
+            create_sandbox(None, snapshot="snapshot-123"),
             "SnapshotParams",
             "snapshot",
             "snapshot-123",
@@ -129,6 +129,11 @@ def test_daytona_snapshot_and_image_are_mutually_exclusive():
 
     with pytest.raises(ValueError, match="exactly one"):
         DaytonaSandbox()
+
+
+def test_explicit_e2b_backend_rejects_daytona_snapshot():
+    with pytest.raises(ValueError, match="does not support Daytona snapshots"):
+        create_sandbox(None, snapshot="snapshot", backend="e2b")
 
 
 def test_daytona_snapshot_rejects_sdk_unsupported_resource_overrides():

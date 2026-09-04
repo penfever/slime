@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Protocol
 from collections.abc import Sequence
 
-from infra.iris.file_transfer import S3Input, parse_s3_input_argument
+from infra.iris.file_transfer import S3Input, S3Output, parse_s3_input_argument, parse_s3_output_argument
 
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -68,6 +68,8 @@ class IrisLaunchSpec:
     setup_commands: tuple[str, ...] = ()
     rendezvous_dir: str | None = None
     s3_inputs: tuple[S3Input, ...] = ()
+    s3_outputs: tuple[S3Output, ...] = ()
+    s3_sync_interval_seconds: float = 300.0
 
     def validate(self) -> None:
         if not _JOB_NAME.fullmatch(self.job_name) or "/" in self.job_name:
@@ -128,11 +130,16 @@ class IrisLaunchSpec:
             for other in destinations[index + 1 :]:
                 if destination in other.parents or other in destination.parents:
                     raise LaunchConfigError("S3 input destinations must not overlap")
+        if self.s3_sync_interval_seconds <= 0:
+            raise LaunchConfigError("--s3-sync-interval-seconds must be greater than zero")
+        output_sources = [item.source for item in self.s3_outputs]
+        if len(output_sources) != len(set(output_sources)):
+            raise LaunchConfigError("S3 output sources must be unique")
 
     def resolved_env(self, environ: dict[str, str] | None = None) -> dict[str, str]:
         """Resolve explicitly named secrets without mutating or printing them."""
         source = os.environ if environ is None else environ
-        missing = [name for name in self.secret_env_names if name not in source]
+        missing = [name for name in self.secret_env_names if not source.get(name)]
         if missing:
             raise LaunchConfigError(f"missing requested secret environment variables: {', '.join(missing)}")
         return {**self.env, **{name: source[name] for name in self.secret_env_names}}
@@ -146,6 +153,7 @@ class IrisLaunchSpec:
         rendered["secret_env_names"] = list(self.secret_env_names)
         rendered["setup_commands"] = list(self.setup_commands)
         rendered["s3_inputs"] = [item.as_assignment() for item in self.s3_inputs]
+        rendered["s3_outputs"] = [item.as_assignment() for item in self.s3_outputs]
         rendered["task_command"] = list(self.task_command())
         return rendered
 
@@ -161,11 +169,16 @@ class IrisLaunchSpec:
                 "--",
                 *command,
             )
-        if not self.s3_inputs:
+        if not self.s3_inputs and not self.s3_outputs:
             return command
         transfer_arguments = tuple(
             argument for item in self.s3_inputs for argument in ("--s3-input", item.as_assignment())
         )
+        transfer_arguments += tuple(
+            argument for item in self.s3_outputs for argument in ("--s3-output", item.as_assignment())
+        )
+        if self.s3_outputs:
+            transfer_arguments += ("--s3-sync-interval-seconds", str(self.s3_sync_interval_seconds))
         return "python", "-m", "infra.iris.file_transfer", *transfer_arguments, "--", *command
 
 
@@ -331,6 +344,20 @@ def create_parser() -> argparse.ArgumentParser:
         metavar="S3_URI=ABSOLUTE_PATH",
         help="atomically materialize an S3 object or prefix on every task before Ray starts",
     )
+    parser.add_argument(
+        "--s3-output",
+        action="append",
+        type=parse_s3_output_argument,
+        default=[],
+        metavar="ABSOLUTE_LOCAL_PATH=S3_URI",
+        help="periodically mirror a task-local file or directory into a shared S3 prefix",
+    )
+    parser.add_argument(
+        "--s3-sync-interval-seconds",
+        type=float,
+        default=300.0,
+        help="seconds between S3 output syncs while the task command runs",
+    )
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--dry-run", action="store_true", help="validate and print a redacted request")
     parser.add_argument("--no-wait", action="store_true", help="return immediately after submission")
@@ -373,6 +400,8 @@ def spec_from_args(args: argparse.Namespace) -> IrisLaunchSpec:
         setup_commands=tuple(args.setup_command),
         rendezvous_dir=args.rendezvous_dir,
         s3_inputs=tuple(args.s3_input),
+        s3_outputs=tuple(args.s3_output),
+        s3_sync_interval_seconds=args.s3_sync_interval_seconds,
     )
     spec.validate()
     return spec

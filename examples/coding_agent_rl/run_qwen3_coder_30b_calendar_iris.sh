@@ -14,6 +14,8 @@ PROMPT_DATA="${PROMPT_DATA:-/app/assets/calendar-v3-slime.jsonl}"
 PARTITION_DIR="${PARTITION_DIR:-/tmp/slime-calendar-data}"
 TRAIN_PROMPT_DATA="${PARTITION_DIR}/train.jsonl"
 EVAL_PROMPT_DATA="${PARTITION_DIR}/eval.jsonl"
+SAVE_PATH="${SAVE_PATH:-/app/checkpoints/${RUN_ID}}"
+SAVE_INTERVAL="${SAVE_INTERVAL:-20}"
 
 for path in \
     "${HF_CHECKPOINT}/config.json" \
@@ -25,6 +27,7 @@ for path in \
 done
 
 mkdir -p "${PARTITION_DIR}"
+mkdir -p "${SAVE_PATH}"
 partition_args=(
     --input "${PROMPT_DATA}"
     --train "${TRAIN_PROMPT_DATA}"
@@ -63,6 +66,8 @@ exec python3 -u train.py \
     "${MODEL_ARGS[@]}" \
     --hf-checkpoint "${HF_CHECKPOINT}" \
     --ref-load "${REF_MODEL_PATH}" \
+    --save "${SAVE_PATH}" \
+    --save-interval "${SAVE_INTERVAL}" \
     --custom-generate-function-path examples.coding_agent_rl.generate.generate \
     --prompt-data "${TRAIN_PROMPT_DATA}" \
     --input-key prompt \

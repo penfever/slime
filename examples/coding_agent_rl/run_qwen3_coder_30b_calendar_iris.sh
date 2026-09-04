@@ -53,6 +53,8 @@ exec python3 -u train.py \
     --label-key label \
     --metadata-key metadata \
     --num-rollout 400 \
+    --rollout-shuffle \
+    --rollout-seed "${ROLLOUT_SEED:-42}" \
     --rollout-batch-size 32 \
     --n-samples-per-prompt 8 \
     --rollout-max-context-len 32768 \

@@ -163,7 +163,7 @@ def materialize_s3_input(item: S3Input) -> None:
 def mirror_s3_output(item: S3Output, uploaded: dict[Path, tuple[int, int]] | None = None) -> int:
     """Upload new or changed files without deleting objects written by other tasks."""
     if not item.source.exists():
-        raise ValueError(f"S3 output source does not exist: {item.source}")
+        return 0
 
     filesystem, destination_path = _filesystem_and_path(item.destination)
     local_files = (

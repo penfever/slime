@@ -139,7 +139,7 @@ class IrisLaunchSpec:
     def resolved_env(self, environ: dict[str, str] | None = None) -> dict[str, str]:
         """Resolve explicitly named secrets without mutating or printing them."""
         source = os.environ if environ is None else environ
-        missing = [name for name in self.secret_env_names if name not in source]
+        missing = [name for name in self.secret_env_names if not source.get(name)]
         if missing:
             raise LaunchConfigError(f"missing requested secret environment variables: {', '.join(missing)}")
         return {**self.env, **{name: source[name] for name in self.secret_env_names}}

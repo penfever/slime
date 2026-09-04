@@ -31,8 +31,9 @@ with `--s3-output /absolute/local/path=s3://bucket/path`. The launcher uploads n
 or changed files every five minutes by default and once more after a clean command
 exit. Multi-node jobs may use the same destination prefix: globally unique
 distributed-checkpoint shard names converge there without one task deleting files
-written by another. Override the cadence with `--s3-sync-interval-seconds`, and use
-a unique S3 prefix for every job.
+written by another. Replicas that never create the local output path contribute no
+files and still exit normally. Override the cadence with
+`--s3-sync-interval-seconds`, and use a unique S3 prefix for every job.
 
 Always inspect a dry run first:
 

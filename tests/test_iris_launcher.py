@@ -229,6 +229,23 @@ def test_s3_output_tree_is_mirrored_after_command(tmp_path, monkeypatch):
     assert filesystem.cat("bucket/checkpoints/run/latest_checkpointed_iteration.txt") == b"10"
 
 
+def test_s3_output_may_remain_absent_on_a_replica(tmp_path):
+    source = tmp_path / "checkpoints"
+
+    exit_code = run_file_transfer(
+        [
+            "--s3-output",
+            f"{source}=s3://bucket/checkpoints/run",
+            "--",
+            sys.executable,
+            "-c",
+            "pass",
+        ]
+    )
+
+    assert exit_code == 0
+
+
 def test_s3_output_is_mirrored_while_command_is_running(tmp_path, monkeypatch):
     filesystem = fsspec.filesystem("memory")
 
@@ -325,6 +342,9 @@ def test_secret_resolution_is_explicit_and_reports_missing_names():
 
     with pytest.raises(LaunchConfigError, match="TOKEN"):
         spec.resolved_env({})
+
+    with pytest.raises(LaunchConfigError, match="TOKEN"):
+        spec.resolved_env({"TOKEN": ""})
 
 
 def test_redacted_request_contains_no_environment_values():

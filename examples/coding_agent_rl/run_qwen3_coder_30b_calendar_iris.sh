@@ -11,6 +11,9 @@ set -euo pipefail
 HF_CHECKPOINT="${HF_CHECKPOINT:-/app/assets/hf-model}"
 REF_MODEL_PATH="${REF_MODEL_PATH:-/app/assets/torch-dist}"
 PROMPT_DATA="${PROMPT_DATA:-/app/assets/calendar-v3-slime.jsonl}"
+PARTITION_DIR="${PARTITION_DIR:-/tmp/slime-calendar-data}"
+TRAIN_PROMPT_DATA="${PARTITION_DIR}/train.jsonl"
+EVAL_PROMPT_DATA="${PARTITION_DIR}/eval.jsonl"
 
 for path in \
     "${HF_CHECKPOINT}/config.json" \
@@ -20,6 +23,14 @@ for path in \
     /app/assets/claude-code-2.1.259.tgz; do
     [[ -e "${path}" ]] || { echo "missing required asset: ${path}" >&2; exit 1; }
 done
+
+mkdir -p "${PARTITION_DIR}"
+python3 examples/coding_agent_rl/partition_jsonl.py \
+    --input "${PROMPT_DATA}" \
+    --train "${TRAIN_PROMPT_DATA}" \
+    --eval "${EVAL_PROMPT_DATA}" \
+    --eval-size "${EVAL_SIZE:-128}" \
+    --seed "${EVAL_SEED:-42}"
 
 export MODEL_ARGS_ROTARY_BASE=10000000
 export PYTHONPATH="/root/Megatron-LM:${PWD}${PYTHONPATH:+:${PYTHONPATH}}"
@@ -48,7 +59,7 @@ exec python3 -u train.py \
     --hf-checkpoint "${HF_CHECKPOINT}" \
     --ref-load "${REF_MODEL_PATH}" \
     --custom-generate-function-path examples.coding_agent_rl.generate.generate \
-    --prompt-data "${PROMPT_DATA}" \
+    --prompt-data "${TRAIN_PROMPT_DATA}" \
     --input-key prompt \
     --label-key label \
     --metadata-key metadata \
@@ -60,6 +71,11 @@ exec python3 -u train.py \
     --rollout-max-context-len 32768 \
     --rollout-max-response-len 4096 \
     --rollout-temperature 1.0 \
+    --eval-interval "${EVAL_INTERVAL:-2}" \
+    --eval-prompt-data calendar-v3-heldout "${EVAL_PROMPT_DATA}" \
+    --n-samples-per-eval-prompt 1 \
+    --eval-temperature 0.0 \
+    --eval-max-response-len 4096 \
     --num-steps-per-rollout 1 \
     --global-batch-size 256 \
     --micro-batch-size 1 \

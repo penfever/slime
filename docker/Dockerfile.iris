@@ -1,7 +1,12 @@
 ARG SLIME_BASE_IMAGE=slimerl/slime:latest
 FROM ${SLIME_BASE_IMAGE}
 
+ARG MARIN_IRIS_REVISION=922781dc5d32f28f3e47f37b17be8ac7269e013d
+
 # Keep this pin aligned with requirements.txt. This small derivative lets Iris
-# jobs consume launcher-managed S3 inputs without rebuilding the CUDA stack.
-RUN python -m pip install --no-cache-dir "s3fs==2026.4.0" && \
-    python -c "from importlib.metadata import version; assert version('s3fs') == '2026.4.0'"
+# jobs consume launcher-managed S3 inputs and publish coding-agent adapter
+# endpoints without rebuilding the CUDA stack.
+RUN python -m pip install --no-cache-dir \
+        "s3fs==2026.4.0" \
+        "marin-iris @ git+https://github.com/marin-community/marin.git@${MARIN_IRIS_REVISION}#subdirectory=lib/iris" && \
+    python -c "from importlib.metadata import version; from iris.cluster.client.endpoint_client import EndpointClient; from iris.rpc.controller_connect import ControllerServiceClientSync; assert version('s3fs') == '2026.4.0'"

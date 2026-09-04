@@ -1,0 +1,7 @@
+ARG SLIME_BASE_IMAGE=slimerl/slime:latest
+FROM ${SLIME_BASE_IMAGE}
+
+# Keep this pin aligned with requirements.txt. This small derivative lets Iris
+# jobs consume launcher-managed S3 inputs without rebuilding the CUDA stack.
+RUN python -m pip install --no-cache-dir "s3fs==2026.4.0" && \
+    python -c "from importlib.metadata import version; assert version('s3fs') == '2026.4.0'"

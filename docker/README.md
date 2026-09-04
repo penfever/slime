@@ -44,6 +44,21 @@ docker build -f docker/Dockerfile . \
   -t slimerl/slime:latest-cu130
 ```
 
+For an Iris task image derived from an already-published immutable Slime image,
+build the small runtime layer instead of rebuilding the CUDA stack:
+
+```bash
+docker buildx build --platform linux/amd64 \
+  -f docker/Dockerfile.iris \
+  --build-arg SLIME_BASE_IMAGE='slimerl/slime@sha256:<digest>' \
+  -t ghcr.io/<organization>/slime:iris-<version> \
+  --push .
+```
+
+This derivative pins the S3 transport required by launcher-managed `--s3-input`
+materialization and `s3://` multi-node rendezvous. Keep its `s3fs` pin aligned
+with `requirements.txt`.
+
 The following components are pinned and rebuilt in the image:
 
 - Megatron-LM `1dcf0dafa884ad52ffb243625717a3471643e087`, plus
@@ -52,6 +67,16 @@ The following components are pinned and rebuilt in the image:
   `zhuzilin/DeepGEMM` batch-invariant branch, rebuilt as an SGLang-compatible wheel.
 - DeepEP `6845ffd9d59126ec0030c13e0e155935a61e5b5a` from the
   `zhuzilin/DeepEP` `align_fp8_quantization` branch (GLM-5 low-latency alignment).
+
+The default build still installs Slime from `THUDM/slime`. Fork images can set
+both `SLIME_REPOSITORY` and `SLIME_COMMIT` to install an attributable fork
+revision, for example:
+
+```bash
+docker build -f docker/Dockerfile . \
+  --build-arg SLIME_REPOSITORY=https://github.com/penfever/slime.git \
+  --build-arg SLIME_COMMIT=<commit>
+```
 
 For a non-default GPU architecture list, pass
 `--build-arg DEEPEP_CUDA_ARCH_LIST='<torch arch list>'`.

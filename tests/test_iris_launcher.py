@@ -1,11 +1,12 @@
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 import fsspec
 import pytest
 
-from infra.iris.file_transfer import S3Input, run as run_file_transfer
+from infra.iris.file_transfer import S3Input, S3Output, run as run_file_transfer
 from infra.iris.launcher import IrisLaunchSpec, LaunchConfigError, run
 
 
@@ -107,6 +108,53 @@ def test_multinode_s3_inputs_materialize_before_ray(tmp_path, capsys):
     ]
 
 
+def test_multinode_s3_outputs_wrap_ray_and_are_visible_in_dry_run(tmp_path, capsys):
+    exit_code = run(
+        [
+            "--cluster",
+            "cw-rno2a",
+            "--task-image",
+            "image",
+            "--nodes",
+            "5",
+            "--rendezvous-dir",
+            "s3://experiments/slime-test",
+            "--s3-output",
+            "/app/checkpoints=s3://experiments/slime-test/checkpoints",
+            "--s3-sync-interval-seconds",
+            "60",
+            "--workspace",
+            str(tmp_path),
+            "--dry-run",
+            "--",
+            "python",
+            "train.py",
+        ]
+    )
+
+    rendered = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert rendered["s3_outputs"] == ["/app/checkpoints=s3://experiments/slime-test/checkpoints"]
+    assert rendered["task_command"] == [
+        "python",
+        "-m",
+        "infra.iris.file_transfer",
+        "--s3-output",
+        "/app/checkpoints=s3://experiments/slime-test/checkpoints",
+        "--s3-sync-interval-seconds",
+        "60.0",
+        "--",
+        "python",
+        "-m",
+        "infra.iris.ray_runtime",
+        "--rendezvous-dir",
+        "s3://experiments/slime-test",
+        "--",
+        "python",
+        "train.py",
+    ]
+
+
 def test_s3_input_preserves_equals_in_object_key():
     item = S3Input.parse("s3://bucket/tmp/ttl=14d/assets=/app/assets")
 
@@ -150,6 +198,75 @@ def test_s3_input_tree_replaces_destination_before_command(tmp_path, monkeypatch
     assert storage_options["config_kwargs"]["s3"] == {"addressing_style": "virtual"}
 
 
+def test_s3_output_tree_is_mirrored_after_command(tmp_path, monkeypatch):
+    filesystem = fsspec.filesystem("memory")
+
+    def resolve_filesystem(_destination, **_options):
+        return filesystem, "bucket/checkpoints/run"
+
+    monkeypatch.setattr(fsspec.core, "url_to_fs", resolve_filesystem)
+    source = tmp_path / "checkpoints"
+
+    exit_code = run_file_transfer(
+        [
+            "--s3-output",
+            f"{source}=s3://bucket/checkpoints/run",
+            "--",
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import sys; root = Path(sys.argv[1]); "
+                "(root / 'iter_0000010').mkdir(parents=True); "
+                "(root / 'iter_0000010/rank-0.pt').write_bytes(b'checkpoint'); "
+                "(root / 'latest_checkpointed_iteration.txt').write_text('10')"
+            ),
+            str(source),
+        ]
+    )
+
+    assert exit_code == 0
+    assert filesystem.cat("bucket/checkpoints/run/iter_0000010/rank-0.pt") == b"checkpoint"
+    assert filesystem.cat("bucket/checkpoints/run/latest_checkpointed_iteration.txt") == b"10"
+
+
+def test_s3_output_is_mirrored_while_command_is_running(tmp_path, monkeypatch):
+    filesystem = fsspec.filesystem("memory")
+
+    def resolve_filesystem(_destination, **_options):
+        return filesystem, "bucket/checkpoints/run"
+
+    source = tmp_path / "checkpoints"
+
+    class RunningCommand:
+        def __init__(self, _command):
+            self.wait_count = 0
+
+        def wait(self, timeout):
+            self.wait_count += 1
+            if self.wait_count == 1:
+                source.mkdir()
+                (source / "latest_checkpointed_iteration.txt").write_text("10")
+                raise subprocess.TimeoutExpired("train", timeout)
+            return 0
+
+    monkeypatch.setattr(fsspec.core, "url_to_fs", resolve_filesystem)
+    monkeypatch.setattr(subprocess, "Popen", RunningCommand)
+
+    exit_code = run_file_transfer(
+        [
+            "--s3-output",
+            f"{source}=s3://bucket/checkpoints/run",
+            "--s3-sync-interval-seconds",
+            "1",
+            "--",
+            "train",
+        ]
+    )
+
+    assert exit_code == 0
+    assert filesystem.cat("bucket/checkpoints/run/latest_checkpointed_iteration.txt") == b"10"
+
+
 @pytest.mark.parametrize(
     "assignment",
     [
@@ -161,6 +278,19 @@ def test_s3_input_tree_replaces_destination_before_command(tmp_path, monkeypatch
 def test_s3_input_rejects_unsafe_transfer_boundaries(assignment):
     with pytest.raises(ValueError):
         S3Input.parse(assignment)
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        "relative/path=s3://bucket/checkpoints",
+        "/=s3://bucket/checkpoints",
+        "/app/checkpoints=not-s3://bucket/checkpoints",
+    ],
+)
+def test_s3_output_rejects_unsafe_transfer_boundaries(assignment):
+    with pytest.raises(ValueError):
+        S3Output.parse(assignment)
 
 
 def test_spec_rejects_overlapping_s3_input_destinations():

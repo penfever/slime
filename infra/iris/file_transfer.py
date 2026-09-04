@@ -1,4 +1,4 @@
-"""Materialize S3 inputs before starting an Iris task command."""
+"""Materialize S3 inputs and mirror task outputs while running an Iris command."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import os
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -41,15 +42,45 @@ class S3Input:
         return f"{self.source}={self.destination}"
 
 
-def _filesystem_and_path(source: str):
+@dataclass(frozen=True)
+class S3Output:
+    """An absolute node-local source mirrored into an S3 object prefix."""
+
+    source: Path
+    destination: str
+
+    @classmethod
+    def parse(cls, value: str) -> S3Output:
+        source, separator, destination = value.partition("=")
+        bucket, path_separator, destination_path = destination.removeprefix("s3://").partition("/")
+        local_path = Path(source)
+        if (
+            not separator
+            or not destination.startswith("s3://")
+            or not bucket
+            or not path_separator
+            or not destination_path
+        ):
+            raise ValueError("expected /ABSOLUTE/LOCAL/PATH=s3://BUCKET/PATH")
+        if not local_path.is_absolute():
+            raise ValueError("S3 output source must be an absolute path")
+        if local_path == Path(local_path.anchor):
+            raise ValueError("S3 output source must not be the filesystem root")
+        return cls(source=local_path, destination=destination.rstrip("/"))
+
+    def as_assignment(self) -> str:
+        return f"{self.source}={self.destination}"
+
+
+def _filesystem_and_path(uri: str):
     try:
         import fsspec  # noqa: PLC0415
     except ImportError as error:
-        raise RuntimeError("S3 inputs require fsspec and s3fs in the task image") from error
+        raise RuntimeError("S3 transfers require fsspec and s3fs in the task image") from error
 
     try:
         return fsspec.core.url_to_fs(
-            source,
+            uri,
             config_kwargs={
                 "connect_timeout": S3_CONNECT_TIMEOUT,
                 "read_timeout": S3_READ_TIMEOUT,
@@ -58,7 +89,7 @@ def _filesystem_and_path(source: str):
             },
         )
     except ImportError as error:
-        raise RuntimeError("S3 inputs require fsspec and s3fs in the task image") from error
+        raise RuntimeError("S3 transfers require fsspec and s3fs in the task image") from error
 
 
 def _replace(staging: Path, destination: Path) -> None:
@@ -129,6 +160,33 @@ def materialize_s3_input(item: S3Input) -> None:
             shutil.rmtree(staging)
 
 
+def mirror_s3_output(item: S3Output, uploaded: dict[Path, tuple[int, int]] | None = None) -> int:
+    """Upload new or changed files without deleting objects written by other tasks."""
+    if not item.source.exists():
+        raise ValueError(f"S3 output source does not exist: {item.source}")
+
+    filesystem, destination_path = _filesystem_and_path(item.destination)
+    local_files = (
+        [item.source] if item.source.is_file() else sorted(path for path in item.source.rglob("*") if path.is_file())
+    )
+    uploaded = uploaded if uploaded is not None else {}
+    uploaded_count = 0
+    for local_file in local_files:
+        stat = local_file.stat()
+        fingerprint = (stat.st_size, stat.st_mtime_ns)
+        if uploaded.get(local_file) == fingerprint:
+            continue
+        relative = Path(local_file.name) if item.source.is_file() else local_file.relative_to(item.source)
+        remote_file = f"{destination_path.rstrip('/')}/{relative.as_posix()}"
+        filesystem.put_file(str(local_file), remote_file)
+        remote_size = int(filesystem.info(remote_file)["size"])
+        if remote_size != stat.st_size:
+            raise ValueError(f"S3 output size mismatch for {item.destination}/{relative.as_posix()}")
+        uploaded[local_file] = fingerprint
+        uploaded_count += 1
+    return uploaded_count
+
+
 def parse_s3_input_argument(value: str) -> S3Input:
     """Parse an S3 input for either the launcher or task-runtime CLI."""
     try:
@@ -137,9 +195,19 @@ def parse_s3_input_argument(value: str) -> S3Input:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
+def parse_s3_output_argument(value: str) -> S3Output:
+    """Parse an S3 output for either the launcher or task-runtime CLI."""
+    try:
+        return S3Output.parse(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--s3-input", action="append", type=parse_s3_input_argument, default=[])
+    parser.add_argument("--s3-output", action="append", type=parse_s3_output_argument, default=[])
+    parser.add_argument("--s3-sync-interval-seconds", type=float, default=300.0)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 
@@ -149,9 +217,34 @@ def run(argv: Sequence[str] | None = None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise ValueError("a task command is required after '--'")
+    if args.s3_sync_interval_seconds <= 0:
+        raise ValueError("--s3-sync-interval-seconds must be greater than zero")
     for item in args.s3_input:
         materialize_s3_input(item)
-    return subprocess.run(command, check=False).returncode
+    if not args.s3_output:
+        return subprocess.run(command, check=False).returncode
+
+    uploaded = {item: {} for item in args.s3_output}
+    process = subprocess.Popen(command)
+    while True:
+        try:
+            return_code = process.wait(timeout=args.s3_sync_interval_seconds)
+            break
+        except subprocess.TimeoutExpired:
+            for item in args.s3_output:
+                try:
+                    mirror_s3_output(item, uploaded[item])
+                except (OSError, RuntimeError, ValueError) as error:
+                    print(f"S3 output sync failed; will retry: {error}", file=sys.stderr, flush=True)
+
+    output_failed = False
+    for item in args.s3_output:
+        try:
+            mirror_s3_output(item, uploaded[item])
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"final S3 output sync failed: {error}", file=sys.stderr, flush=True)
+            output_failed = True
+    return return_code if return_code != 0 else int(output_failed)
 
 
 def main() -> None:

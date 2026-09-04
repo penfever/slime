@@ -26,6 +26,14 @@ repeatable `--s3-input s3://bucket/path=/local/path`. Every replica downloads an
 size-checks the input into a temporary sibling path, then atomically replaces the
 destination before Ray starts. The task image must provide `fsspec` and `s3fs`.
 
+Long-running jobs should mirror checkpoints or other mutable outputs into shared S3
+with `--s3-output /absolute/local/path=s3://bucket/path`. The launcher uploads new
+or changed files every five minutes by default and once more after a clean command
+exit. Multi-node jobs may use the same destination prefix: globally unique
+distributed-checkpoint shard names converge there without one task deleting files
+written by another. Override the cadence with `--s3-sync-interval-seconds`, and use
+a unique S3 prefix for every job.
+
 Always inspect a dry run first:
 
 ```bash
@@ -35,6 +43,7 @@ python -m infra.iris.launcher \
   --job-name slime-smoke \
   --gpus-per-node 8 \
   --s3-input s3://marin-us-east-02a/models/example=/app/model \
+  --s3-output /app/checkpoints/example=s3://marin-us-east-02a/checkpoints/example \
   --secret-env WANDB_API_KEY \
   --dry-run \
   -- bash -lc 'nvidia-smi && python -c "import slime, ray, torch; print(torch.cuda.device_count())"'

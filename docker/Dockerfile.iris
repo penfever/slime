@@ -5,8 +5,11 @@ ARG MARIN_IRIS_REVISION=922781dc5d32f28f3e47f37b17be8ac7269e013d
 
 # Keep this pin aligned with requirements.txt. This small derivative lets Iris
 # jobs consume launcher-managed S3 inputs and publish coding-agent adapter
-# endpoints without rebuilding the CUDA stack.
-RUN python -m pip install --no-cache-dir \
-        "s3fs==2026.4.0" \
+# endpoints without rebuilding the CUDA stack. Only the endpoint-side Iris
+# packages are needed here; resolving all Iris dependencies would downgrade
+# pyqwest below the version required by the image's E2B client.
+RUN python -m pip install --no-cache-dir "s3fs==2026.4.0" && \
+    python -m pip install --no-cache-dir --no-deps \
+        "marin-rigging @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/rigging" \
         "marin-iris @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/iris" && \
-    python -c "from importlib.metadata import version; from iris.cluster.client.endpoint_client import EndpointClient; from iris.rpc.controller_connect import ControllerServiceClientSync; assert version('s3fs') == '2026.4.0'"
+    python -c "from importlib.metadata import requires, version; from packaging.requirements import Requirement; from iris.cluster.client.endpoint_client import EndpointClient; from iris.cluster.client.job_info import get_job_info; from iris.cluster.types import EndpointAccess; from iris.rpc.controller_connect import ControllerServiceClientSync, EndpointServiceClientSync; from rigging.timing import Duration; e2b_pyqwest = next(Requirement(item) for item in requires('e2b') if Requirement(item).name == 'pyqwest'); assert version('s3fs') == '2026.4.0'; assert e2b_pyqwest.specifier.contains(version('pyqwest'))"

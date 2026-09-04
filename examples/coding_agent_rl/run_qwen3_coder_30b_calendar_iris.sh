@@ -25,12 +25,17 @@ for path in \
 done
 
 mkdir -p "${PARTITION_DIR}"
-python3 examples/coding_agent_rl/partition_jsonl.py \
-    --input "${PROMPT_DATA}" \
-    --train "${TRAIN_PROMPT_DATA}" \
-    --eval "${EVAL_PROMPT_DATA}" \
-    --eval-size "${EVAL_SIZE:-128}" \
+partition_args=(
+    --input "${PROMPT_DATA}"
+    --train "${TRAIN_PROMPT_DATA}"
+    --eval "${EVAL_PROMPT_DATA}"
+    --eval-size "${EVAL_SIZE:-128}"
     --seed "${EVAL_SEED:-42}"
+)
+if [[ -n "${TRAIN_SIZE:-}" ]]; then
+    partition_args+=(--train-size "${TRAIN_SIZE}" --train-seed "${TRAIN_SUBSET_SEED:-42}")
+fi
+python3 examples/coding_agent_rl/partition_jsonl.py "${partition_args[@]}"
 
 export MODEL_ARGS_ROTARY_BASE=10000000
 export PYTHONPATH="/root/Megatron-LM:${PWD}${PYTHONPATH:+:${PYTHONPATH}}"

@@ -8,5 +8,5 @@ ARG MARIN_IRIS_REVISION=922781dc5d32f28f3e47f37b17be8ac7269e013d
 # endpoints without rebuilding the CUDA stack.
 RUN python -m pip install --no-cache-dir \
         "s3fs==2026.4.0" \
-        "marin-iris @ git+https://github.com/marin-community/marin.git@${MARIN_IRIS_REVISION}#subdirectory=lib/iris" && \
+        "marin-iris @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/iris" && \
     python -c "from importlib.metadata import version; from iris.cluster.client.endpoint_client import EndpointClient; from iris.rpc.controller_connect import ControllerServiceClientSync; assert version('s3fs') == '2026.4.0'"

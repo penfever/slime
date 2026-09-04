@@ -1,16 +1,13 @@
-ARG SLIME_BASE_IMAGE=slimerl/slime:latest
+ARG SLIME_BASE_IMAGE=slimerl/slime@sha256:39be6cbb00f9b6770e664ace0c7b9f5ecff2977a1a205e7926a720f906fbc62c
 FROM ${SLIME_BASE_IMAGE}
 
-ARG MARIN_IRIS_REVISION=922781dc5d32f28f3e47f37b17be8ac7269e013d
-
-# Keep this pin aligned with requirements.txt. This small derivative lets Iris
-# jobs consume launcher-managed S3 inputs and publish coding-agent adapter
-# endpoints without rebuilding the CUDA stack. This Daytona image resolves the
-# complete Iris runtime. Iris currently selects pyqwest 0.6.x, outside E2B's
-# declared range, so use the base Slime image for E2B-backed rollouts.
-RUN python -m pip install --no-cache-dir "s3fs==2026.4.0" && \
-    python -m pip install --no-cache-dir \
-        "daytona==0.182.0" \
-        "marin-rigging @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/rigging" \
-        "marin-iris @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/iris" && \
-    python -c "from importlib.metadata import version; import daytona; from iris.cluster.client.endpoint_client import EndpointClient; from iris.cluster.client.job_info import get_job_info; from iris.cluster.types import EndpointAccess; from iris.rpc.controller_connect import ControllerServiceClientSync, EndpointServiceClientSync; from rigging.timing import Duration; assert version('daytona') == '0.182.0'; assert version('s3fs') == '2026.4.0'"
+# This is the exact runtime overlay installed by the healthy r13 Slime arm.
+# Pin the mutually released Marin packages together so a later package upload
+# cannot make pip combine Iris with a different rigging/finestore build.
+RUN python -m pip install --no-cache-dir \
+        "s3fs==2026.7.0" \
+        "daytona==0.207.1" \
+        "marin-iris==0.2.91.dev32816546334" \
+        "marin-rigging==0.2.91.dev32816546334" \
+        "marin-finestore==0.2.91.dev32816546334" && \
+    python -c "from importlib.metadata import version; import daytona; from iris.cluster.client.endpoint_client import EndpointClient; from iris.cluster.client.job_info import get_job_info; from iris.cluster.types import EndpointAccess; from iris.rpc.controller_connect import ControllerServiceClientSync, EndpointServiceClientSync; from rigging.timing import Duration; assert version('daytona') == '0.207.1'; assert version('marin-iris') == '0.2.91.dev32816546334'; assert version('marin-rigging') == '0.2.91.dev32816546334'; assert version('marin-finestore') == '0.2.91.dev32816546334'; assert version('s3fs') == '2026.7.0'"

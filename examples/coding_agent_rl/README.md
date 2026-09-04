@@ -33,6 +33,12 @@ For the five-node Qwen3-Coder calendar layout, use
 GPUs to six TP4 rollout engines; `--sglang-server-concurrency 5` caps active
 agent sandboxes at 30 across those engines.
 
+The calendar driver deterministically reserves 128 tasks as a disjoint held-out
+set, evaluates them before training and after every two rollouts at temperature
+zero, and trains on the remaining tasks. `EVAL_SIZE`, `EVAL_SEED`, and
+`EVAL_INTERVAL` override those defaults. Paired runs must use the same values so
+their fixed-eval reward curves remain directly comparable.
+
 ## Dataset Format
 
 Standard slime JSONL with three keys:

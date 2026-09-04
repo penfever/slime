@@ -926,6 +926,10 @@ jobs:
             {
               "num_gpus": 0,
               "test_file": "test_agent/test_agent_rollout_cpu.py"
+            },
+            {
+              "num_gpus": 0,
+              "test_file": "test_agent/test_partition_jsonl.py"
             }
           ]
     defaults:

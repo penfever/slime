@@ -10,7 +10,7 @@ ARG MARIN_IRIS_REVISION=922781dc5d32f28f3e47f37b17be8ac7269e013d
 # declared range, so use the base Slime image for E2B-backed rollouts.
 RUN python -m pip install --no-cache-dir "s3fs==2026.4.0" && \
     python -m pip install --no-cache-dir \
-        "daytona==0.210.0" \
+        "daytona==0.182.0" \
         "marin-rigging @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/rigging" \
         "marin-iris @ https://github.com/marin-community/marin/archive/${MARIN_IRIS_REVISION}.zip#subdirectory=lib/iris" && \
-    python -c "from importlib.metadata import version; import daytona; from iris.cluster.client.endpoint_client import EndpointClient; from iris.cluster.client.job_info import get_job_info; from iris.cluster.types import EndpointAccess; from iris.rpc.controller_connect import ControllerServiceClientSync, EndpointServiceClientSync; from rigging.timing import Duration; assert version('daytona') == '0.210.0'; assert version('s3fs') == '2026.4.0'"
+    python -c "from importlib.metadata import version; import daytona; from iris.cluster.client.endpoint_client import EndpointClient; from iris.cluster.client.job_info import get_job_info; from iris.cluster.types import EndpointAccess; from iris.rpc.controller_connect import ControllerServiceClientSync, EndpointServiceClientSync; from rigging.timing import Duration; assert version('daytona') == '0.182.0'; assert version('s3fs') == '2026.4.0'"

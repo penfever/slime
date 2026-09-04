@@ -206,6 +206,30 @@ def test_redacted_request_contains_no_environment_values():
     assert "sensitive-ish" not in str(rendered)
 
 
+@pytest.mark.parametrize("profile", ["docker-access", "privileged"])
+def test_elevated_profile_is_explicit_in_dry_run(tmp_path, capsys, profile):
+    exit_code = run(
+        [
+            "--cluster",
+            "cw-rno2a",
+            "--task-image",
+            "docker:29-cli",
+            "--container-profile",
+            profile,
+            "--workspace",
+            str(tmp_path),
+            "--dry-run",
+            "--",
+            "docker",
+            "version",
+        ]
+    )
+
+    rendered = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert rendered["container_profile"] == profile
+
+
 def test_run_submits_validated_command_without_importing_iris(tmp_path):
     backend = RecordingBackend()
     exit_code = run(

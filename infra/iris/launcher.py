@@ -23,6 +23,7 @@ from infra.iris.file_transfer import S3Input, parse_s3_input_argument
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _JOB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 SUPPORTED_PRIORITIES = ("production", "interactive", "batch")
+SUPPORTED_CONTAINER_PROFILES = ("default", "docker-access", "privileged")
 DEFAULT_NODES = 1
 DEFAULT_GPU_VARIANT = "H100"
 DEFAULT_GPUS_PER_NODE = 8
@@ -61,6 +62,7 @@ class IrisLaunchSpec:
     max_retries_preemption: int = DEFAULT_MAX_RETRIES_PREEMPTION
     max_task_failures: int = DEFAULT_MAX_TASK_FAILURES
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    container_profile: str = "default"
     env: dict[str, str] = field(default_factory=dict)
     secret_env_names: tuple[str, ...] = ()
     setup_commands: tuple[str, ...] = ()
@@ -101,6 +103,8 @@ class IrisLaunchSpec:
             raise LaunchConfigError("--disk must not be empty")
         if self.priority not in SUPPORTED_PRIORITIES:
             raise LaunchConfigError(f"--priority must be one of: {', '.join(SUPPORTED_PRIORITIES)}")
+        if self.container_profile not in SUPPORTED_CONTAINER_PROFILES:
+            raise LaunchConfigError(f"--container-profile must be one of: {', '.join(SUPPORTED_CONTAINER_PROFILES)}")
         for name, value in (
             ("--max-retries-failure", self.max_retries_failure),
             ("--max-retries-preemption", self.max_retries_preemption),
@@ -201,6 +205,11 @@ class IrisBackend:
             "interactive": job_pb2.PRIORITY_BAND_INTERACTIVE,
             "batch": job_pb2.PRIORITY_BAND_BATCH,
         }
+        container_profiles = {
+            "default": job_pb2.CONTAINER_PROFILE_DEFAULT,
+            "docker-access": job_pb2.CONTAINER_PROFILE_DOCKER_ACCESS,
+            "privileged": job_pb2.CONTAINER_PROFILE_PRIVILEGED,
+        }
         timeout = Duration.from_seconds(spec.timeout_seconds) if spec.timeout_seconds else None
         environment = EnvironmentSpec(
             env_vars=spec.resolved_env(),
@@ -238,6 +247,7 @@ class IrisBackend:
                 timeout=timeout,
                 task_image=spec.task_image,
                 priority_band=priority_bands[spec.priority],
+                container_profile=container_profiles[spec.container_profile],
                 submit_argv=sys.argv,
             )
             job_id = str(job.job_id)
@@ -283,6 +293,12 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--memory", default=DEFAULT_MEMORY)
     parser.add_argument("--disk", default=DEFAULT_DISK)
     parser.add_argument("--priority", choices=SUPPORTED_PRIORITIES, default=DEFAULT_PRIORITY)
+    parser.add_argument(
+        "--container-profile",
+        choices=SUPPORTED_CONTAINER_PROFILES,
+        default="default",
+        help="task container security profile; docker-access and privileged are elevated and must be requested explicitly",
+    )
     parser.add_argument("--max-retries-failure", type=int, default=DEFAULT_MAX_RETRIES_FAILURE)
     parser.add_argument("--max-retries-preemption", type=int, default=DEFAULT_MAX_RETRIES_PREEMPTION)
     parser.add_argument("--max-task-failures", type=int, default=DEFAULT_MAX_TASK_FAILURES)
@@ -351,6 +367,7 @@ def spec_from_args(args: argparse.Namespace) -> IrisLaunchSpec:
         max_retries_preemption=args.max_retries_preemption,
         max_task_failures=args.max_task_failures,
         timeout_seconds=args.timeout_seconds,
+        container_profile=args.container_profile,
         env=env,
         secret_env_names=tuple(args.secret_env),
         setup_commands=tuple(args.setup_command),

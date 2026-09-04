@@ -1,5 +1,5 @@
 ARG SGLANG_IMAGE_TAG=v0.5.15.post1-cu129
-FROM slimerl/sglang:${SGLANG_IMAGE_TAG} AS sglang
+FROM docker.io/slimerl/sglang:${SGLANG_IMAGE_TAG} AS sglang
 
 # ======================================== Arguments =============================================
 
@@ -14,6 +14,7 @@ ARG TRANSFORMER_ENGINE_CUDA_ARCHS=100a;103a
 ARG TMS_COMMIT=8d30c59ca12a68d9deccbc9c6599076a1218cbc5
 
 ARG TMS_CUDA_MAJOR=
+ARG SLIME_REPOSITORY=https://github.com/THUDM/slime.git
 
 # ======================================== Setup =============================================
 
@@ -103,6 +104,7 @@ RUN pip install "nvidia-modelopt[torch]>=0.37.0" --no-build-isolation
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --ignore-installed PyJWT && \
     pip install -r /tmp/requirements.txt
+RUN python -c "from importlib.metadata import version; assert version('s3fs') == '2026.4.0'"
 
 # Megatron currently requires NumPy 1.x, while SciPy 1.18+ requires NumPy 2.x.
 # Pin both packages together so downgrading NumPy does not leave an incompatible SciPy.
@@ -153,7 +155,7 @@ fi
 # ====================================== Install main package ============================================
 
 ARG SLIME_COMMIT=main
-RUN git clone https://github.com/THUDM/slime.git /root/slime && \
+RUN git clone ${SLIME_REPOSITORY} /root/slime && \
     cd /root/slime && \
     git checkout ${SLIME_COMMIT} && \
     pip install -e . --no-deps
